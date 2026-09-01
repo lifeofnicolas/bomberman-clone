@@ -6,6 +6,9 @@ class Sfx {
   constructor() {
     this.ctx = null;
     this.muted = false;
+    this.volume = 1; // master effects volume (0..1)
+    this.suppressed = false; // true while the title-screen demo runs
+    this.onReady = null; // called once the context is running
   }
 
   // Must be called from a user gesture (key press / click) before sounds play.
@@ -19,7 +22,9 @@ class Sfx {
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().then(() => this.onReady && this.onReady()).catch(() => {});
+    } else if (this.ctx && this.ctx.state === 'running' && this.onReady) {
+      this.onReady();
     }
   }
 
@@ -28,8 +33,10 @@ class Sfx {
     return this.muted;
   }
 
-  tone(freq, duration, { type = 'square', volume = 0.12, slideTo = null, delay = 0 } = {}) {
-    if (this.muted || !this.ctx) return;
+  tone(freq, duration, { type = 'square', volume = 0.12, slideTo = null, delay = 0, force = false } = {}) {
+    if (this.muted || !this.ctx || (this.suppressed && !force)) return;
+    volume *= this.volume;
+    if (volume <= 0) return;
     const t = this.ctx.currentTime + delay;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -44,7 +51,9 @@ class Sfx {
   }
 
   noise(duration, volume = 0.25) {
-    if (this.muted || !this.ctx) return;
+    if (this.muted || !this.ctx || this.suppressed) return;
+    volume *= this.volume;
+    if (volume <= 0) return;
     const ctx = this.ctx;
     const length = Math.floor(ctx.sampleRate * duration);
     const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
@@ -90,7 +99,45 @@ class Sfx {
 
   levelClear() {
     const notes = [523, 659, 784, 1047];
-    notes.forEach((n, i) => this.tone(n, 0.16, { type: 'square', volume: 0.1, delay: i * 0.13 }));
+    notes.forEach((n, i) => this.tone(n, 0.16, { type: 'square', volume: 0.1, delay: i * 0.13, force: true }));
+  }
+
+  victory() {
+    const notes = [523, 659, 784, 1047, 784, 1047, 1319];
+    notes.forEach((n, i) => this.tone(n, i === notes.length - 1 ? 0.5 : 0.14, { type: 'square', volume: 0.1, delay: i * 0.12, force: true }));
+    notes.forEach((n, i) => this.tone(n / 2, i === notes.length - 1 ? 0.5 : 0.14, { type: 'triangle', volume: 0.1, delay: i * 0.12, force: true }));
+  }
+
+  gameOverJingle() {
+    const notes = [392, 370, 349, 330, 262];
+    notes.forEach((n, i) => this.tone(n, i === notes.length - 1 ? 0.6 : 0.22, { type: 'square', volume: 0.09, delay: i * 0.22, force: true }));
+  }
+
+  bossHit() {
+    this.noise(0.15, 0.25);
+    this.tone(220, 0.25, { type: 'sawtooth', volume: 0.12, slideTo: 110 });
+  }
+
+  bossRoar() {
+    this.tone(80, 0.6, { type: 'sawtooth', volume: 0.14, slideTo: 55 });
+    this.tone(120, 0.6, { type: 'square', volume: 0.06, slideTo: 70, delay: 0.05 });
+  }
+
+  countdown() {
+    this.tone(660, 0.1, { type: 'square', volume: 0.08 });
+  }
+
+  go() {
+    this.tone(880, 0.25, { type: 'square', volume: 0.1 });
+    this.tone(1320, 0.25, { type: 'square', volume: 0.05, delay: 0.02 });
+  }
+
+  tally() {
+    this.tone(1000, 0.03, { type: 'square', volume: 0.04, force: true });
+  }
+
+  menu() {
+    this.tone(700, 0.05, { type: 'square', volume: 0.05, force: true });
   }
 
   exitOpen() {

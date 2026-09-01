@@ -3,18 +3,22 @@
 // ---------------------------------------------------------------------------
 
 class Game {
-  constructor(canvas, input, sfx, ui) {
+  constructor(canvas, input, sfx, music, ui) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.input = input;
     this.sfx = sfx;
+    this.music = music;
     this.ui = ui;
 
     this.settings = Save.load();
     this.sfx.muted = !!this.settings.muted;
+    this.sfx.volume = this.settings.sfxVolume;
+    this.music.setVolume(this.settings.musicVolume);
     this.ui.setMuted(this.sfx.muted);
+    this.ui.onActivate = () => this.sfx.menu();
 
-    // title | setup | playing | paused | levelclear | roundover | gameover
+    // title | setup | intro | playing | paused | levelclear | roundover | gameover
     this.state = 'title';
     this.mode = 1; // 1 = campaign, 2 = battle
     this.level = 1;
@@ -25,6 +29,11 @@ class Game {
     this.timeLeft = LEVEL_TIME;
     this.lastTickSecond = -1;
     this.freeze = 0;
+    this.demo = false;
+    this.demoRestart = 0;
+    this.intro = null;
+    this.results = null;
+    this.resetArmed = false;
 
     this.players = [];
     this.enemies = [];
@@ -36,6 +45,7 @@ class Game {
     this.particles = [];
     this.floaters = [];
     this.exit = null;
+    this.boss = null;
     this.shake = { t: 0, mag: 0 };
     this.spiral = null;
     this.spiralIndex = 0;
@@ -44,7 +54,6 @@ class Game {
     this.timedOut = false;
     this.danger = new Uint8Array(COLS * ROWS);
 
-    // Decorative arena behind the title screen.
     this.grid = buildLevel('classic', 0.55).grid;
     Renderer.setTheme(this.theme);
     this.showTitle();
@@ -58,12 +67,18 @@ class Game {
     return this.ui.isTouch() ? 'Tap a button to choose' : keyboardText;
   }
 
+  isMenu() {
+    return this.state === 'title' || this.state === 'setup' || this.state === 'levelclear' || this.state === 'roundover' || this.state === 'gameover' || this.state === 'paused';
+  }
+
   // ------------------------------------------------------------------
   // Menus
   // ------------------------------------------------------------------
   showTitle() {
     this.state = 'title';
     this.ui.buildHud([], 1);
+    this.music.play('title');
+    if (!this.demo) this.startDemo();
     const hs = this.settings.highScores;
     this.ui.showOverlay({
       title: 'BOMBERMAN',
@@ -71,12 +86,13 @@ class Game {
       buttons: [
         { label: 'CAMPAIGN', action: () => this.showCampaignSetup() },
         { label: 'BATTLE', action: () => this.showBattleSetup() },
+        { label: 'OPTIONS', action: () => this.showOptions() },
         { label: 'HOW TO PLAY', action: () => this.showHelp() },
       ],
       help:
         `High scores  Easy ${hs.easy}  ·  Normal ${hs.normal}  ·  Hard ${hs.hard}\n` +
         `Battle matches won: ${this.settings.battleWins}\n` +
-        this.keyHint('Press 1-3 to choose · Enter to confirm'),
+        this.keyHint('Press 1-4 to choose · Enter to confirm'),
     });
   }
 
@@ -88,7 +104,8 @@ class Game {
       action: () => {
         this.settings.difficulty = key;
         this.saveSettings();
-        this.startCampaign(key);
+        if ((this.settings.progress[key] || 1) > 1) this.showWorldSelect(key);
+        else this.startCampaign(key, 0);
       },
     }));
     buttons.push({ label: 'BACK', action: () => this.showTitle(), back: true });
@@ -97,10 +114,30 @@ class Game {
       text:
         'Easy  ·  5 lives, 240 s, slow enemies, lots of power-ups\n' +
         'Normal  ·  3 lives, 200 s, the classic experience\n' +
-        'Hard  ·  2 lives, 150 s, fast enemies, lose power-ups on death',
+        'Hard  ·  2 lives, 150 s, fast enemies, lose power-ups on death\n\n' +
+        'Five worlds of five stages. Each world ends with a boss.',
       buttons,
       help: this.keyHint('Press 1-3 to choose · Esc to go back'),
       focus: DIFFICULTY_ORDER.indexOf(current),
+    });
+  }
+
+  showWorldSelect(difficulty) {
+    this.state = 'setup';
+    const unlocked = Math.min(WORLD_ORDER.length, this.settings.progress[difficulty] || 1);
+    const buttons = [];
+    for (let w = 0; w < unlocked; w++) {
+      const theme = THEMES[WORLD_ORDER[w]];
+      buttons.push({ label: `WORLD ${w + 1} · ${theme.name.toUpperCase()}`, action: () => this.startCampaign(difficulty, w) });
+    }
+    buttons.push({ label: 'BACK', action: () => this.showCampaignSetup(), back: true });
+    const best = this.settings.bestLevel[difficulty] || 0;
+    this.ui.showOverlay({
+      title: 'SELECT WORLD',
+      text: `${DIFFICULTY[difficulty].label} · ${unlocked} of ${WORLD_ORDER.length} worlds unlocked\nBest stage reached: ${best ? `${Math.floor((best - 1) / LEVELS_PER_WORLD) + 1}-${((best - 1) % LEVELS_PER_WORLD) + 1}` : '-'}`,
+      buttons,
+      help: this.keyHint(`Press 1-${unlocked} to choose · Esc to go back`),
+      focus: unlocked - 1,
     });
   }
 
@@ -149,7 +186,83 @@ class Game {
         },
         { label: 'BACK', action: () => this.showTitle(), back: true },
       ],
-      help: this.keyHint('Press 1-5 to choose · Enter to start · Esc to go back\nPlayer 2 uses I J K L and Enter'),
+      help: this.keyHint('Press 1-5 to choose · Enter to start · Esc to go back\nPlayer 2 uses I J K L and Enter, or a second gamepad'),
+    });
+  }
+
+  showOptions() {
+    this.state = 'setup';
+    const s = this.settings;
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    const cycleVolume = (v) => (v >= 1 ? 0 : Math.min(1, v + 0.25));
+    const rerender = () => {
+      const focus = this.ui.focusIndex;
+      this.saveSettings();
+      this.showOptions();
+      this.ui.focusButton(focus);
+    };
+    const touchLabel = s.touchUI === null || s.touchUI === undefined ? 'AUTO' : s.touchUI ? 'ON' : 'OFF';
+
+    this.ui.showOverlay({
+      title: 'OPTIONS',
+      text: 'Settings are saved in this browser.',
+      buttons: [
+        {
+          label: `MUSIC: ${pct(s.musicVolume)}`,
+          action: () => {
+            s.musicVolume = cycleVolume(s.musicVolume);
+            this.music.setVolume(s.musicVolume);
+            rerender();
+          },
+        },
+        {
+          label: `SOUND: ${pct(s.sfxVolume)}`,
+          action: () => {
+            s.sfxVolume = cycleVolume(s.sfxVolume);
+            this.sfx.volume = s.sfxVolume;
+            rerender();
+          },
+        },
+        {
+          label: `SCREEN SHAKE: ${s.shake ? 'ON' : 'OFF'}`,
+          action: () => {
+            s.shake = !s.shake;
+            rerender();
+          },
+        },
+        {
+          label: `TOUCH CONTROLS: ${touchLabel}`,
+          action: () => {
+            s.touchUI = s.touchUI === null || s.touchUI === undefined ? true : s.touchUI ? false : null;
+            this.ui.setTouchUI(s.touchUI === null ? this.ui.coarse : s.touchUI);
+            rerender();
+          },
+        },
+        {
+          label: this.resetArmed ? 'CONFIRM RESET?' : 'RESET PROGRESS',
+          action: () => {
+            if (!this.resetArmed) {
+              this.resetArmed = true;
+            } else {
+              this.resetArmed = false;
+              s.highScores = { easy: 0, normal: 0, hard: 0 };
+              s.bestLevel = { easy: 0, normal: 0, hard: 0 };
+              s.progress = { easy: 1, normal: 1, hard: 1 };
+              s.battleWins = 0;
+            }
+            rerender();
+          },
+        },
+        {
+          label: 'BACK',
+          action: () => {
+            this.resetArmed = false;
+            this.showTitle();
+          },
+          back: true,
+        },
+      ],
+      help: this.keyHint('Press 1-6 to choose · Esc to go back · M mutes everything'),
     });
   }
 
@@ -161,9 +274,10 @@ class Game {
       text:
         (touch
           ? 'Move with the D-pad, drop bombs with the big button.\n'
-          : 'Move with W A S D or the arrow keys, drop bombs with Space.\n') +
+          : 'Move with W A S D or the arrow keys, drop bombs with Space.\nGamepads work too: D-pad or stick to move, A to bomb, B to detonate.\n') +
         'Bombs explode in a cross and destroy bricks, enemies and players.\n' +
         'Campaign: defeat every enemy, then find the exit hidden under a brick.\n' +
+        'Every fifth stage is a boss: hit it with flames until its health bar is empty.\n' +
         'Battle: last one standing wins the round.\n\n' +
         'Power-ups:  💣 extra bomb   🔥 bigger flames   ⚡ speed\n' +
         '👟 kick bombs   📡 remote bombs (bomb key again' +
@@ -178,11 +292,12 @@ class Game {
   // ------------------------------------------------------------------
   // Game setup
   // ------------------------------------------------------------------
-  startCampaign(difficulty) {
+  startCampaign(difficulty, worldIdx = 0) {
+    this.stopDemo();
     this.mode = 1;
     this.difficulty = difficulty;
     this.diff = DIFFICULTY[difficulty];
-    this.level = 1;
+    this.level = worldIdx * LEVELS_PER_WORLD + 1;
     const p = new Player(PLAYER_CONFIGS[0], spawnCorners()[0]);
     p.lives = this.diff.lives;
     this.players = [p];
@@ -190,6 +305,7 @@ class Game {
   }
 
   startBattle() {
+    this.stopDemo();
     this.mode = 2;
     this.level = 1;
     const setup = this.settings.battle;
@@ -207,6 +323,27 @@ class Game {
     this.startLevel();
   }
 
+  // Attract mode: four hard bots fight behind the title menu.
+  startDemo() {
+    this.demo = true;
+    this.demoRestart = 0;
+    this.mode = 2;
+    this.level = 1 + Math.floor(Math.random() * WORLD_ORDER.length);
+    this.players = PLAYER_CONFIGS.map((cfg, i) => {
+      const p = new Player(cfg, spawnCorners()[i]);
+      p.bot = new Bot(p, 'hard');
+      p.name = `CPU${i + 1}`;
+      return p;
+    });
+    this.sfx.suppressed = true;
+    this.setupLevel();
+  }
+
+  stopDemo() {
+    this.demo = false;
+    this.sfx.suppressed = false;
+  }
+
   campaignStage() {
     const idx = this.level - 1;
     const worldIdx = Math.floor(idx / LEVELS_PER_WORLD);
@@ -215,26 +352,34 @@ class Game {
       stage: idx % LEVELS_PER_WORLD,
       loop: Math.floor(worldIdx / WORLD_ORDER.length),
       theme: WORLD_ORDER[worldIdx % WORLD_ORDER.length],
+      boss: idx % LEVELS_PER_WORLD === LEVELS_PER_WORLD - 1,
     };
   }
 
-  startLevel() {
+  isBossLevel() {
+    return this.mode === 1 && this.campaignStage().boss;
+  }
+
+  // Build the arena, spawn everything, reset timers. Does not touch UI state.
+  setupLevel() {
     const battle = this.mode === 2;
     let templateName;
     let density;
-    let label;
 
     if (battle) {
       this.theme = WORLD_ORDER[(this.level - 1) % WORLD_ORDER.length];
       templateName = randomItem(TEMPLATE_NAMES);
       density = 0.6;
-      label = `ROUND ${this.level}`;
+      this.levelLabel = `ROUND ${this.level}`;
     } else {
       const s = this.campaignStage();
       this.theme = s.theme;
-      templateName = WORLD_TEMPLATES[s.theme][s.stage];
-      density = Math.min(0.75, Math.max(0.3, 0.45 + s.stage * 0.05 + s.loop * 0.05 + this.diff.densityMod));
-      label = `${THEMES[s.theme].name.toUpperCase()}  ${s.world % WORLD_ORDER.length + 1}-${s.stage + 1}`;
+      templateName = s.boss ? 'arena' : WORLD_TEMPLATES[s.theme][s.stage];
+      density = s.boss
+        ? Math.min(0.5, Math.max(0.2, 0.32 + this.diff.densityMod))
+        : Math.min(0.75, Math.max(0.3, 0.45 + s.stage * 0.05 + s.loop * 0.05 + this.diff.densityMod));
+      this.levelLabel = `${THEMES[s.theme].name.toUpperCase()}  ${s.world + 1}-${s.stage + 1}`;
+      if (s.boss) this.levelLabel += '  ·  BOSS';
     }
     Renderer.setTheme(this.theme);
 
@@ -245,6 +390,7 @@ class Game {
       p.spawn = built.spawns[i] || spawnCorners()[i];
       spawns.push(p.spawn);
       p.resetForLevel(battle ? BATTLE_SHIELD : SPAWN_SHIELD);
+      p.levelKills = 0;
       if (battle) {
         p.resetPowers();
         p.maxBombs = 2;
@@ -261,20 +407,31 @@ class Game {
     this.floaters = [];
     this.enemies = [];
     this.exit = null;
+    this.boss = null;
     this.timedOut = false;
     this.suddenDeath = false;
     this.spiral = null;
     this.spiralIndex = 0;
     this.spiralTimer = 0;
     this.shake = { t: 0, mag: 0 };
+    this.freeze = 0;
     this.exitAnnounced = false;
 
     // Enemies
     const roster = battle ? this.battleRoster() : this.campaignRoster();
     for (const type of roster) this.spawnEnemy(type, spawns, battle ? 1 : this.diff.speedMult);
 
-    // Hidden exit under a brick (campaign only)
-    if (!battle) {
+    if (!battle && this.isBossLevel()) {
+      const s = this.campaignStage();
+      const cx = Math.floor(COLS / 2);
+      const cy = Math.floor(ROWS / 2);
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (this.grid[cy + dy][cx + dx] === TILE_BRICK) this.grid[cy + dy][cx + dx] = TILE_EMPTY;
+      }
+      this.boss = new Boss(s.theme, cx, cy, s.world + 1, this.diff.speedMult);
+      this.enemies.push(this.boss);
+    } else if (!battle) {
+      // Hidden exit under a brick
       const bricks = tilesOfType(this.grid, TILE_BRICK);
       const far = bricks.filter((t) => manhattan(t, spawns[0]) >= 6);
       const spot = randomItem(far.length ? far : bricks);
@@ -283,11 +440,17 @@ class Game {
 
     this.timeLeft = battle ? BATTLE_TIME : this.diff.levelTime;
     this.lastTickSecond = -1;
-    this.state = 'playing';
+  }
+
+  startLevel() {
+    this.setupLevel();
+    this.state = 'intro';
+    this.intro = { t: 0, ready: false, go: false };
     this.ui.hideOverlay();
     this.ui.buildHud(this.players, this.mode);
     this.ui.updateHud(this);
-    this.announce(label);
+    this.updateMusic();
+    if (this.boss) this.sfx.bossRoar();
   }
 
   spawnEnemy(type, spawns, speedMult) {
@@ -298,17 +461,25 @@ class Game {
     let candidates = all.filter((t) => !taken(t) && spawns.every((s) => manhattan(t, s) >= 6));
     if (!candidates.length) candidates = all.filter((t) => !taken(t) && spawns.every((s) => manhattan(t, s) >= 4));
     if (!candidates.length) candidates = all.filter((t) => spawns.every((s) => manhattan(t, s) >= 3));
-    if (!candidates.length) return;
+    if (!candidates.length) return null;
     const spot = randomItem(candidates);
-    this.enemies.push(new Enemy(type, spot.x, spot.y, speedMult));
+    const e = new Enemy(type, spot.x, spot.y, speedMult);
+    this.enemies.push(e);
+    return e;
+  }
+
+  pacingPool() {
+    const pacing = PACING[this.difficulty];
+    let entry = pacing[0];
+    for (const e of pacing) if (e.from <= this.level) entry = e;
+    return entry;
   }
 
   campaignRoster() {
     const loop = Math.floor((this.level - 1) / (LEVELS_PER_WORLD * WORLD_ORDER.length));
-    const count = Math.min(14, this.diff.enemyCount(this.level) + loop * 2);
-    const pacing = PACING[this.difficulty];
-    let entry = pacing[0];
-    for (const e of pacing) if (e.from <= this.level) entry = e;
+    const boss = this.isBossLevel();
+    const count = boss ? 2 : Math.min(14, this.diff.enemyCount(this.level) + loop * 2);
+    const entry = this.pacingPool();
     const pool = entry.pool;
     const smartPool = pool.filter((t) => ENEMY_TYPES[t].smart);
     const list = [];
@@ -319,7 +490,7 @@ class Game {
       }
       list.push(type);
     }
-    if (entry.from === this.level && list.length) list[0] = pool[pool.length - 1];
+    if (!boss && entry.from === this.level && list.length) list[0] = pool[pool.length - 1];
     return list;
   }
 
@@ -334,8 +505,9 @@ class Game {
   // State transitions
   // ------------------------------------------------------------------
   pause() {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' && this.state !== 'intro') return;
     this.state = 'paused';
+    this.music.setDuck(0.3);
     this.ui.showOverlay({
       title: 'PAUSED',
       text: '',
@@ -350,6 +522,7 @@ class Game {
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    this.music.setDuck(1);
     this.ui.hideOverlay();
   }
 
@@ -369,24 +542,55 @@ class Game {
 
   levelClear() {
     this.state = 'levelclear';
+    this.music.stop();
     const p = this.players[0];
-    const timeBonus = Math.floor(this.timeLeft) * 5 * this.diff.scoreMult;
-    p.score += Math.round(500 * this.diff.scoreMult + timeBonus);
-    this.sfx.levelClear();
+    const mult = this.diff.scoreMult;
+    const timeFrac = this.timeLeft / this.diff.levelTime;
+    const stars = timeFrac >= 0.5 ? 3 : timeFrac >= 0.25 ? 2 : 1;
+    const items = [
+      { label: this.boss ? 'Boss defeated' : 'Stage clear', value: Math.round((this.boss ? 1500 : 500) * mult) },
+      { label: 'Time bonus', value: Math.round(Math.floor(this.timeLeft) * 5 * mult) },
+      { label: `Enemies defeated x${p.levelKills}`, value: Math.round(p.levelKills * 50 * mult) },
+    ];
+    const total = items.reduce((a, b) => a + b.value, 0);
+    p.score += total;
+
+    // Unlock the next world after a boss.
+    let unlockedText = '';
+    if (this.campaignStage().boss) {
+      const nextWorld = Math.floor(this.level / LEVELS_PER_WORLD) + 1; // 1-based
+      if (nextWorld <= WORLD_ORDER.length && (this.settings.progress[this.difficulty] || 1) < nextWorld) {
+        this.settings.progress[this.difficulty] = nextWorld;
+        unlockedText = `\n★ World ${nextWorld} unlocked: ${THEMES[WORLD_ORDER[nextWorld - 1]].name}`;
+      }
+    }
     const newBest = this.recordCampaign();
+    if (this.boss) this.sfx.victory();
+    else this.sfx.levelClear();
     this.ui.updateHud(this);
+
     const next = this.level + 1;
     const nextIdx = next - 1;
-    const nextTheme = WORLD_ORDER[Math.floor(nextIdx / LEVELS_PER_WORLD) % WORLD_ORDER.length];
-    this.ui.showOverlay({
-      title: 'LEVEL CLEAR!',
-      text:
-        `Level ${this.level} complete\nTime bonus: ${Math.round(timeBonus)}\nScore: ${p.score}` +
+    const nextWorldIdx = Math.floor(nextIdx / LEVELS_PER_WORLD);
+    const nextTheme = WORLD_ORDER[nextWorldIdx % WORLD_ORDER.length];
+    this.results = {
+      t: 0,
+      items,
+      total,
+      stars,
+      done: false,
+      footer:
+        `\nScore: ${p.score}` +
         (newBest ? '\n★ New high score!' : '') +
-        `\n\nNext: ${THEMES[nextTheme].name} ${Math.floor(nextIdx / LEVELS_PER_WORLD) % WORLD_ORDER.length + 1}-${nextIdx % LEVELS_PER_WORLD + 1}`,
+        unlockedText +
+        `\n\nNext: ${THEMES[nextTheme].name} ${nextWorldIdx + 1}-${(nextIdx % LEVELS_PER_WORLD) + 1}`,
+    };
+    this.ui.showOverlay({
+      title: this.boss ? 'BOSS DEFEATED!' : 'STAGE CLEAR!',
+      text: '',
       buttons: [
         {
-          label: 'NEXT LEVEL',
+          label: 'NEXT STAGE',
           action: () => {
             this.level += 1;
             this.startLevel();
@@ -396,25 +600,64 @@ class Game {
       ],
       help: this.keyHint('Press Enter or Space to continue'),
     });
+    this.renderResults();
+  }
+
+  // Animated score tally on the stage-clear screen.
+  updateResults(dt) {
+    const r = this.results;
+    if (!r || r.done) return;
+    r.t += dt * 1000;
+    const totalTime = r.items.length * 450 + 400;
+    if (r.t >= totalTime) r.done = true;
+    else if (Math.floor(r.t / 60) !== Math.floor((r.t - dt * 1000) / 60)) this.sfx.tally();
+    this.renderResults();
+  }
+
+  finishResults() {
+    if (this.results) {
+      this.results.done = true;
+      this.renderResults();
+    }
+  }
+
+  renderResults() {
+    const r = this.results;
+    if (!r) return;
+    const lines = [];
+    r.items.forEach((item, i) => {
+      const start = i * 450;
+      if (!r.done && r.t < start) return;
+      const f = r.done ? 1 : Math.min(1, (r.t - start) / 400);
+      lines.push(`${item.label}  ·  +${Math.round(item.value * f)}`);
+    });
+    if (r.done) {
+      lines.push('', '★'.repeat(r.stars) + '☆'.repeat(3 - r.stars), r.footer.trim());
+    }
+    this.ui.setOverlayText(lines.join('\n'));
   }
 
   gameOver() {
     this.state = 'gameover';
+    this.music.stop();
+    this.sfx.gameOverJingle();
     const p = this.players[0];
     const newBest = this.recordCampaign();
+    const s = this.campaignStage();
     this.ui.showOverlay({
       title: 'GAME OVER',
-      text: `Final score: ${p.score}\nReached level ${this.level} (${DIFFICULTY[this.difficulty].label})` + (newBest ? '\n★ New high score!' : ''),
+      text: `Final score: ${p.score}\nReached ${THEMES[s.theme].name} ${s.world + 1}-${s.stage + 1} (${DIFFICULTY[this.difficulty].label})` + (newBest ? '\n★ New high score!' : ''),
       buttons: [
-        { label: 'PLAY AGAIN', action: () => this.startCampaign(this.difficulty) },
+        { label: 'RETRY WORLD', action: () => this.startCampaign(this.difficulty, Math.min(s.world, WORLD_ORDER.length - 1)) },
         { label: 'MAIN MENU', action: () => this.showTitle(), back: true },
       ],
-      help: this.keyHint('Press Enter or Space to play again'),
+      help: this.keyHint('Press Enter or Space to retry'),
     });
   }
 
   roundOver(winner) {
     this.state = 'roundover';
+    this.music.stop();
     if (winner) winner.wins += 1;
     this.ui.updateHud(this);
 
@@ -424,6 +667,7 @@ class Game {
         this.settings.battleWins += 1;
         this.saveSettings();
       }
+      this.sfx.victory();
       this.ui.showOverlay({
         title: `${winner.name} WINS THE MATCH!`,
         text: `First to ${ROUNDS_TO_WIN} rounds\n${standings}`,
@@ -436,6 +680,7 @@ class Game {
       return;
     }
 
+    this.sfx.levelClear();
     this.ui.showOverlay({
       title: winner ? `${winner.name} WINS THE ROUND` : 'DRAW',
       text: standings,
@@ -453,13 +698,30 @@ class Game {
     });
   }
 
+  updateMusic() {
+    if (this.demo || this.isMenu()) return;
+    const hurry = (this.mode === 1 && !this.timedOut && this.timeLeft > 0 && this.timeLeft < 30) || this.suddenDeath;
+    if (hurry) this.music.play('hurry');
+    else if (this.boss) this.music.play('boss');
+    else this.music.play(this.theme);
+  }
+
   // ------------------------------------------------------------------
   // Main update
   // ------------------------------------------------------------------
   update(dt) {
     this.elapsed += dt;
     if (this.handleGlobalKeys()) return;
-    if (this.state !== 'playing') return;
+
+    if (this.state === 'levelclear') this.updateResults(dt);
+    if (this.state === 'intro') {
+      this.updateIntro(dt);
+      this.updateEffects(dt);
+      return;
+    }
+
+    const simulating = this.state === 'playing' || (this.demo && (this.state === 'title' || this.state === 'setup'));
+    if (!simulating) return;
 
     if (this.freeze > 0) {
       this.freeze -= dt * 1000;
@@ -498,13 +760,51 @@ class Game {
       }
     }
     this.enemies = this.enemies.filter((e) => e.alive || e.dying);
+    if (this.boss && this.boss.alive) this.updateBoss(dt);
 
     for (const pu of this.powerups) pu.age += dt;
     this.updateEffects(dt);
 
     this.resolveCollisions();
     this.checkEndConditions();
-    this.ui.updateHud(this);
+    if (!this.demo) {
+      this.updateMusic();
+      this.ui.updateHud(this);
+    }
+  }
+
+  updateIntro(dt) {
+    const it = this.intro;
+    it.t += dt * 1000;
+    if (!it.ready && it.t > 300) {
+      it.ready = true;
+      this.sfx.countdown();
+    }
+    if (!it.go && it.t > INTRO_DURATION - 800) {
+      it.go = true;
+      this.sfx.go();
+    }
+    if (it.t >= INTRO_DURATION) {
+      this.state = 'playing';
+      this.intro = null;
+    }
+  }
+
+  updateBoss(dt) {
+    const b = this.boss;
+    b.minionTimer -= dt * 1000;
+    if (b.minionTimer <= 0) {
+      b.minionTimer = BOSS_MINION_INTERVAL;
+      if (this.enemiesRemaining() < 5) {
+        const pool = this.pacingPool().pool.filter((t) => !ENEMY_TYPES[t].passBricks);
+        const spawns = this.players.map((p) => ({ x: p.tx, y: p.ty }));
+        const e = this.spawnEnemy(randomItem(pool.length ? pool : ['balloom']), spawns, this.diff.speedMult);
+        if (e) {
+          this.spawnParticles(e.x, e.y, 10, [b.color, b.accent], 120);
+          this.sfx.curse();
+        }
+      }
+    }
   }
 
   updateTimer(dt) {
@@ -705,9 +1005,14 @@ class Game {
       case 'levelclear':
       case 'roundover':
       case 'gameover': {
+        const confirm = inp.wasPressed(['Enter', 'NumpadEnter', 'Space']);
+        if (this.state === 'levelclear' && this.results && !this.results.done && (confirm || pressedDigit() >= 0)) {
+          this.finishResults();
+          return true;
+        }
         const d = pressedDigit();
         if (d >= 0) return this.ui.activateButton(d);
-        if (inp.wasPressed(['Enter', 'NumpadEnter', 'Space'])) return this.ui.activateFocused();
+        if (confirm) return this.ui.activateFocused();
         if (inp.wasPressed(['Escape', 'Backspace'])) return this.ui.backAction();
         if (inp.wasPressed(['ArrowUp', 'KeyW'])) this.ui.focusMove(-1);
         if (inp.wasPressed(['ArrowDown', 'KeyS'])) this.ui.focusMove(1);
@@ -718,6 +1023,17 @@ class Game {
         }
         return false;
       }
+      case 'intro':
+        if (inp.wasPressed(['Enter', 'NumpadEnter', 'Space'])) {
+          this.state = 'playing';
+          this.intro = null;
+          return true;
+        }
+        if (inp.wasPressed(['KeyP', 'Escape'])) {
+          this.pause();
+          return true;
+        }
+        return false;
       case 'playing':
         if (inp.wasPressed(['KeyP', 'Escape'])) {
           this.pause();
@@ -728,16 +1044,22 @@ class Game {
           return true;
         }
         return false;
-      case 'paused':
-        if (inp.wasPressed(['KeyP', 'Escape', 'Enter', 'NumpadEnter', 'Space'])) {
+      case 'paused': {
+        if (inp.wasPressed(['KeyP', 'Escape'])) {
           this.resume();
           return true;
         }
+        const d = pressedDigit();
+        if (d >= 0) return this.ui.activateButton(d);
+        if (inp.wasPressed(['Enter', 'NumpadEnter', 'Space'])) return this.ui.activateFocused();
+        if (inp.wasPressed(['ArrowUp', 'KeyW'])) this.ui.focusMove(-1);
+        if (inp.wasPressed(['ArrowDown', 'KeyS'])) this.ui.focusMove(1);
         if (inp.wasPressed('KeyR')) {
           this.showTitle();
           return true;
         }
         return false;
+      }
       default:
         return false;
     }
@@ -745,6 +1067,7 @@ class Game {
 
   toggleMute() {
     this.settings.muted = this.sfx.toggleMute();
+    this.music.refreshMute();
     this.ui.setMuted(this.settings.muted);
     this.saveSettings();
   }
@@ -759,6 +1082,15 @@ class Game {
   }
 
   checkEndConditions() {
+    if (this.demo) {
+      const alive = this.players.filter((p) => p.alive);
+      const dying = this.players.some((p) => p.dying);
+      if (alive.length <= 1 && !dying) {
+        this.demoRestart += 1;
+        if (this.demoRestart > 90) this.startDemo();
+      }
+      return;
+    }
     if (this.state !== 'playing') return;
 
     if (this.mode === 1) {
@@ -972,20 +1304,43 @@ class Game {
     this.sfx.death();
   }
 
+  damageBoss(b, killer) {
+    if (b.iframes > 0) return;
+    b.hp -= 1;
+    if (b.hp <= 0) {
+      this.killEnemy(b, killer);
+      return;
+    }
+    b.iframes = BOSS_IFRAMES;
+    this.floaters.push(new Floater('HIT!', b.x, b.y - 40, '#ffee58', 16));
+    this.spawnParticles(b.x, b.y, 12, [b.color, b.accent, '#ffffff'], 150);
+    this.addShake(5);
+    this.sfx.bossHit();
+  }
+
   killEnemy(e, killer) {
     if (!e.alive) return;
     e.alive = false;
     e.dying = true;
-    e.deathTimer = ENEMY_DEATH_DURATION;
+    e.deathTimer = e.isBoss ? ENEMY_DEATH_DURATION * 2 : ENEMY_DEATH_DURATION;
     const mult = this.mode === 1 ? this.diff.scoreMult : 1;
     const points = Math.round(e.cfg.score * mult);
     if (killer) {
       killer.score += points;
       killer.kills += 1;
+      killer.levelKills = (killer.levelKills || 0) + 1;
       this.floaters.push(new Floater(`+${points}`, e.x, e.y - 20, '#ffee58', 14));
     }
-    this.spawnParticles(e.x, e.y, 10, [e.color, '#ffffff'], 130);
-    this.sfx.enemyDie();
+    this.spawnParticles(e.x, e.y, e.isBoss ? 40 : 10, [e.color, '#ffffff'], e.isBoss ? 220 : 130);
+    if (e.isBoss) {
+      this.exit = { tx: e.tx, ty: e.ty, revealed: true };
+      this.announce(`${e.name} DEFEATED!`, '#ffee58');
+      this.addShake(10);
+      this.freeze = 200;
+      this.sfx.bossRoar();
+    } else {
+      this.sfx.enemyDie();
+    }
   }
 
   resolveCollisions() {
@@ -995,16 +1350,19 @@ class Game {
         if (p.alive && p.shield <= 0 && ex.covers(p.tx, p.ty)) this.killPlayer(p);
       }
       for (const e of this.enemies) {
-        if (e.alive && ex.covers(e.tx, e.ty)) this.killEnemy(e, ex.owner);
+        if (!e.alive || !ex.covers(e.tx, e.ty)) continue;
+        if (e.isBoss) this.damageBoss(e, ex.owner);
+        else this.killEnemy(e, ex.owner);
       }
     }
 
     // Enemies touching players
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      const reach = TILE * 0.6 * (e.isBoss ? 1.35 : 1);
       for (const p of this.players) {
         if (!p.alive || p.shield > 0) continue;
-        if (Math.abs(p.x - e.x) < TILE * 0.6 && Math.abs(p.y - e.y) < TILE * 0.6) {
+        if (Math.abs(p.x - e.x) < reach && Math.abs(p.y - e.y) < reach) {
           this.killPlayer(p);
         }
       }
@@ -1070,6 +1428,7 @@ class Game {
   // Effects
   // ------------------------------------------------------------------
   addShake(mag) {
+    if (this.settings.shake === false) return;
     this.shake.mag = Math.max(this.shake.mag, mag);
     this.shake.t = 180;
   }
@@ -1084,6 +1443,7 @@ class Game {
   }
 
   announce(text, color = '#ffee58') {
+    if (this.demo) return;
     this.floaters.push(new Floater(text, CANVAS_W / 2, CANVAS_H / 2 - 30, color, 34, 1800));
   }
 

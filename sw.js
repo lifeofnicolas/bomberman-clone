@@ -1,5 +1,5 @@
 // Minimal cache-first service worker so the game works offline once loaded.
-const CACHE = 'bomberman-v2';
+const CACHE = 'bomberman-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -8,8 +8,10 @@ const ASSETS = [
   './js/constants.js',
   './js/storage.js',
   './js/audio.js',
+  './js/music.js',
   './js/input.js',
   './js/touch.js',
+  './js/gamepad.js',
   './js/level.js',
   './js/entities.js',
   './js/bot.js',

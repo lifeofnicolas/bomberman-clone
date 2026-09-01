@@ -132,6 +132,7 @@ const ENEMY_TYPES = {
   ovapi: { name: 'Ovapi', color: '#26a69a', speed: 70, score: 2000, smart: false, passBricks: true, passBombs: false, fleesBombs: false, turnChance: 0.25, shape: 'ghost' },
   pass: { name: 'Pass', color: '#ffa726', speed: 125, score: 4000, smart: true, passBricks: false, passBombs: true, fleesBombs: true, turnChance: 0.3, shape: 'diamond' },
   pontan: { name: 'Pontan', color: '#ffffff', speed: 140, score: 8000, smart: true, passBricks: true, passBombs: true, fleesBombs: true, turnChance: 0.5, shape: 'star' },
+  boss: { name: 'Boss', color: '#b71c1c', speed: 70, score: 5000, smart: true, passBricks: false, passBombs: false, fleesBombs: true, turnChance: 0.3, shape: 'boss' },
 };
 
 // Campaign difficulty presets.
@@ -180,6 +181,19 @@ const DIFFICULTY = {
   },
 };
 const DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
+
+// World bosses (one per theme). HP and speed scale with the world number.
+const BOSSES = {
+  grass: { name: 'Mossback', color: '#2e7d32', accent: '#a5d6a7' },
+  ice: { name: 'Frostjaw', color: '#0277bd', accent: '#b3e5fc' },
+  desert: { name: 'Dune King', color: '#ef6c00', accent: '#ffe0b2' },
+  factory: { name: 'Gearhead', color: '#455a64', accent: '#ffab00' },
+  volcano: { name: 'Magmaw', color: '#b71c1c', accent: '#ffca28' },
+};
+const BOSS_BASE_HP = 5;
+const BOSS_IFRAMES = 1200;
+const BOSS_MINION_INTERVAL = 9000;
+const INTRO_DURATION = 2400;
 
 // Which enemy types can appear from a given campaign level onward.
 const PACING = {

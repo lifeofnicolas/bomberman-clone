@@ -21,8 +21,10 @@ class UI {
     this.buttons = [];
     this.focusIndex = 0;
     this.touch = false;
+    this.coarse = false;
     this.playerRefs = [];
     this.onTouchToggle = null;
+    this.onActivate = null;
     this.touchToggle.addEventListener('click', () => {
       if (this.onTouchToggle) this.onTouchToggle();
     });
@@ -56,7 +58,7 @@ class UI {
       btn.textContent = b.label;
       btn.addEventListener('click', () => {
         btn.blur();
-        b.action();
+        this.fire(b);
       });
       this.overlayButtons.appendChild(btn);
       this.buttons.push({ el: btn, action: b.action, back: !!b.back });
@@ -65,9 +67,18 @@ class UI {
     this.focusButton(typeof focus === 'number' && focus >= 0 ? focus : 0);
   }
 
+  setOverlayText(text) {
+    this.set(this.overlayText, text);
+  }
+
   hideOverlay() {
     this.overlay.classList.remove('visible');
     this.buttons = [];
+  }
+
+  fire(b) {
+    if (this.onActivate) this.onActivate();
+    b.action();
   }
 
   focusButton(i) {
@@ -84,7 +95,7 @@ class UI {
   activateButton(i) {
     const b = this.buttons[i];
     if (!b) return false;
-    b.action();
+    this.fire(b);
     return true;
   }
 
@@ -94,7 +105,7 @@ class UI {
     const b = this.buttons[this.focusIndex];
     if (!b) return false;
     if (cycleOnly && (this.focusIndex === 0 || b.back)) return false;
-    b.action();
+    this.fire(b);
     return true;
   }
 
@@ -105,7 +116,7 @@ class UI {
   backAction() {
     const b = this.buttons.find((x) => x.back);
     if (!b) return false;
-    b.action();
+    this.fire(b);
     return true;
   }
 
@@ -150,8 +161,13 @@ class UI {
       this.hudPlayers.appendChild(group);
       this.playerRefs.push(refs);
     }
-    this.set(this.levelLabel, battle ? 'ROUND' : 'LEVEL');
+    this.set(this.levelLabel, battle ? 'ROUND' : 'STAGE');
     this.hudPlayers.classList.toggle('many', players.length > 2);
+    if (!players.length) {
+      this.set(this.level, '-');
+      this.set(this.time, '-');
+      this.timerStat.classList.remove('warning');
+    }
   }
 
   updateHud(game) {
@@ -171,7 +187,12 @@ class UI {
       this.set(refs.extras, extras);
       this.set(refs.score, p.score);
     });
-    this.set(this.level, game.level);
+    if (battle) {
+      this.set(this.level, game.level);
+    } else {
+      const s = game.campaignStage();
+      this.set(this.level, `${s.world + 1}-${s.stage + 1}`);
+    }
     this.set(this.time, Math.ceil(game.timeLeft));
     const warn = game.state === 'playing' && ((game.mode === 1 && game.timeLeft < 30) || game.suddenDeath);
     this.timerStat.classList.toggle('warning', warn);
@@ -193,14 +214,15 @@ class UI {
 
   const input = new Input();
   const sfx = new Sfx();
+  const music = new Music(sfx);
   const ui = new UI();
 
   // Touch UI: auto-detect, unless the user forced it on/off.
   const saved = Save.load();
-  const coarse = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || navigator.maxTouchPoints > 0;
-  ui.setTouchUI(saved.touchUI === null || saved.touchUI === undefined ? coarse : saved.touchUI);
+  ui.coarse = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || navigator.maxTouchPoints > 0;
+  ui.setTouchUI(saved.touchUI === null || saved.touchUI === undefined ? ui.coarse : saved.touchUI);
 
-  const game = new Game(canvas, input, sfx, ui);
+  const game = new Game(canvas, input, sfx, music, ui);
   window.game = game; // handy for debugging in the console
 
   ui.onTouchToggle = () => {
@@ -215,7 +237,13 @@ class UI {
   const touch = new TouchControls(input, document.getElementById('touch'));
   touch.onAny = () => sfx.ensure();
 
-  // Browsers require a user gesture before audio can start.
+  const pads = new GamepadInput(input, () => game.isMenu() || game.state === 'intro');
+  pads.onConnect = (pad) => {
+    game.floaters.push(new Floater('Gamepad connected', CANVAS_W / 2, CANVAS_H - 40, '#aed581', 16, 2000));
+  };
+
+  // Browsers require a user gesture before audio can start; music waits for it.
+  sfx.onReady = () => music.resume();
   input.onAny = () => sfx.ensure();
   document.addEventListener('pointerdown', () => sfx.ensure(), { passive: true });
   document.addEventListener('touchend', () => sfx.ensure(), { passive: true });
@@ -239,14 +267,16 @@ class UI {
   // Pause when the tab/app goes to the background.
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      if (game.state === 'playing') game.pause();
+      if (game.state === 'playing' || game.state === 'intro') game.pause();
       input.down.clear();
-    } else if (sfx.ctx && sfx.ctx.state !== 'running') {
-      sfx.ctx.resume().catch(() => {});
+      music.stopTimer();
+    } else {
+      if (sfx.ctx && sfx.ctx.state !== 'running') sfx.ctx.resume().catch(() => {});
+      music.resume();
     }
   });
   window.addEventListener('pagehide', () => {
-    if (game.state === 'playing') game.pause();
+    if (game.state === 'playing' || game.state === 'intro') game.pause();
   });
 
   // Offline support when served over HTTPS (or localhost).
@@ -259,6 +289,7 @@ class UI {
     let dt = (now - last) / 1000;
     last = now;
     if (dt > 0.05) dt = 0.05; // avoid huge steps after a tab switch
+    pads.poll();
     game.update(dt);
     game.render();
     input.endFrame();

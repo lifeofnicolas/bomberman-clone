@@ -314,6 +314,29 @@ class Enemy {
 }
 
 // ---------------------------------------------------------------------------
+class Boss extends Enemy {
+  constructor(theme, tx, ty, world, speedMult = 1) {
+    super('boss', tx, ty, speedMult);
+    const info = BOSSES[theme] || BOSSES.grass;
+    this.isBoss = true;
+    this.name = info.name;
+    this.color = info.color;
+    this.accent = info.accent;
+    this.speed = (70 + world * 8) * speedMult;
+    this.half = TILE * 0.42;
+    this.maxHp = BOSS_BASE_HP + world * 2;
+    this.hp = this.maxHp;
+    this.iframes = 0;
+    this.minionTimer = BOSS_MINION_INTERVAL;
+  }
+
+  update(dt, game) {
+    if (this.iframes > 0) this.iframes -= dt * 1000;
+    super.update(dt, game);
+  }
+}
+
+// ---------------------------------------------------------------------------
 class Bomb {
   constructor(tx, ty, owner, range, fuse) {
     this.x = centerOf(tx);

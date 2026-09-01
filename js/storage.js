@@ -9,7 +9,11 @@ const Save = {
   defaults() {
     return {
       muted: false,
+      musicVolume: 0.5,
+      sfxVolume: 1,
+      shake: true,
       difficulty: 'normal',
+      progress: { easy: 1, normal: 1, hard: 1 }, // worlds unlocked per difficulty
       battle: { humans: 1, bots: 1, skill: 'normal' },
       touchUI: null, // null = auto-detect, true/false = forced
       highScores: { easy: 0, normal: 0, hard: 0 },

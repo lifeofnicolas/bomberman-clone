@@ -472,6 +472,17 @@ const Renderer = (() => {
         ctx.lineTo(cx - r * 1.1, cy);
         ctx.closePath();
         break;
+      case 'boss': {
+        // Big rounded body with horns
+        roundRect(ctx, cx - r, cy - r * 0.9, r * 2, r * 1.9, r * 0.5);
+        ctx.moveTo(cx - r * 0.7, cy - r * 0.8);
+        ctx.lineTo(cx - r * 0.9, cy - r * 1.5);
+        ctx.lineTo(cx - r * 0.3, cy - r * 0.9);
+        ctx.moveTo(cx + r * 0.7, cy - r * 0.8);
+        ctx.lineTo(cx + r * 0.9, cy - r * 1.5);
+        ctx.lineTo(cx + r * 0.3, cy - r * 0.9);
+        break;
+      }
       case 'star': {
         const spikes = 5;
         for (let i = 0; i < spikes * 2; i++) {
@@ -491,12 +502,31 @@ const Renderer = (() => {
     }
   }
 
+  function drawBossBar(ctx, e) {
+    const w = TILE * 1.6;
+    const x = e.x - w / 2;
+    const y = e.y - TILE * 0.95;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, x - 2, y - 2, w + 4, 10, 4);
+    ctx.fill();
+    const f = Math.max(0, e.hp / e.maxHp);
+    ctx.fillStyle = f > 0.5 ? '#66bb6a' : f > 0.25 ? '#ffa726' : '#ef5350';
+    ctx.fillRect(x, y, w * f, 6);
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(e.name, e.x, y - 5);
+  }
+
   function drawEnemy(ctx, e, game) {
     const cx = e.x;
     const bob = Math.sin(e.animTime * 6) * 2;
     const cy = e.y + bob;
     const shape = e.cfg.shape;
     ctx.save();
+    if (e.isBoss && e.alive && e.iframes > 0 && Math.floor(e.iframes / 80) % 2 === 0) {
+      ctx.filter = 'brightness(2.2)';
+    }
     if (e.dying) {
       const t = 1 - e.deathTimer / ENEMY_DEATH_DURATION;
       ctx.globalAlpha = 1 - t;
@@ -509,7 +539,7 @@ const Renderer = (() => {
       drawShadow(ctx, cx, e.y + 19, 14);
     }
 
-    const r = TILE * 0.35;
+    const r = e.isBoss ? TILE * 0.62 : TILE * 0.35;
     ctx.fillStyle = e.color;
     bodyPath(ctx, shape, cx, cy, r, e.animTime);
     ctx.fill();
@@ -531,25 +561,45 @@ const Renderer = (() => {
     }
 
     const look = DIRS[e.dir] || { dx: 0, dy: 0 };
-    ctx.fillStyle = '#fff';
-    circle(ctx, cx - 6, cy - 3, 4.5);
+    const es = e.isBoss ? 1.7 : 1; // eye scale
+    ctx.fillStyle = e.isBoss ? e.accent : '#fff';
+    circle(ctx, cx - 6 * es, cy - 3 * es, 4.5 * es);
     ctx.fill();
-    circle(ctx, cx + 6, cy - 3, 4.5);
+    circle(ctx, cx + 6 * es, cy - 3 * es, 4.5 * es);
     ctx.fill();
-    ctx.fillStyle = shape === 'star' ? '#c62828' : '#111';
-    circle(ctx, cx - 6 + look.dx * 2, cy - 3 + look.dy * 2, 2.2);
+    ctx.fillStyle = shape === 'star' || e.isBoss ? '#c62828' : '#111';
+    circle(ctx, cx - 6 * es + look.dx * 2, cy - 3 * es + look.dy * 2, 2.2 * es);
     ctx.fill();
-    circle(ctx, cx + 6 + look.dx * 2, cy - 3 + look.dy * 2, 2.2);
+    circle(ctx, cx + 6 * es + look.dx * 2, cy - 3 * es + look.dy * 2, 2.2 * es);
     ctx.fill();
 
     ctx.strokeStyle = shape === 'star' ? '#c62828' : '#111';
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 1.8 * es;
     ctx.beginPath();
-    if (e.cfg.smart) ctx.arc(cx, cy + 9, 4.5, Math.PI * 1.15, Math.PI * 1.85);
-    else ctx.arc(cx, cy + 5, 4.5, Math.PI * 0.15, Math.PI * 0.85);
-    ctx.stroke();
+    if (e.isBoss) {
+      // Toothy grin
+      ctx.moveTo(cx - 12, cy + 12);
+      ctx.lineTo(cx + 12, cy + 12);
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx + i * 5 - 2, cy + 12);
+        ctx.lineTo(cx + i * 5 + 2, cy + 12);
+        ctx.lineTo(cx + i * 5, cy + 18);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (e.cfg.smart) {
+      ctx.arc(cx, cy + 9, 4.5, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    } else {
+      ctx.arc(cx, cy + 5, 4.5, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+    }
 
     ctx.restore();
+    if (e.isBoss && e.alive) drawBossBar(ctx, e);
   }
 
   function drawPlayer(ctx, p, game) {
@@ -692,6 +742,40 @@ const Renderer = (() => {
     ctx.globalAlpha = 1;
   }
 
+  function drawIntro(ctx, game) {
+    const it = game.intro;
+    if (!it) return;
+    const t = it.t;
+    const slide = Math.min(1, t / 350);
+    const ease = 1 - Math.pow(1 - slide, 3);
+    const fadeOut = t > INTRO_DURATION - 250 ? (INTRO_DURATION - t) / 250 : 1;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, fadeOut);
+    const h = 120;
+    const y = CANVAS_H / 2 - h / 2;
+    ctx.fillStyle = 'rgba(10, 12, 20, 0.82)';
+    ctx.fillRect(0, y, CANVAS_W, h);
+    ctx.fillStyle = '#ffb300';
+    ctx.fillRect(0, y, CANVAS_W * ease, 4);
+    ctx.fillRect(CANVAS_W * (1 - ease), y + h - 4, CANVAS_W * ease, 4);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffb300';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText(game.levelLabel, CANVAS_W / 2 + (1 - ease) * 300, y + 46);
+
+    const goPhase = t > INTRO_DURATION - 800;
+    const word = goPhase ? 'GO!' : 'READY';
+    const pulse = goPhase ? 1 + Math.min(0.5, (t - (INTRO_DURATION - 800)) / 600) : 1;
+    ctx.fillStyle = goPhase ? '#ffee58' : '#e8e9f0';
+    ctx.font = `bold ${Math.round(40 * pulse)}px sans-serif`;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(word, CANVAS_W / 2, y + 100);
+    ctx.fillText(word, CANVAS_W / 2, y + 100);
+    ctx.restore();
+  }
+
   // ---------------------------------------------------------------------
   function draw(game) {
     const ctx = game.ctx;
@@ -732,6 +816,8 @@ const Renderer = (() => {
     drawFloaters(ctx, game.floaters);
 
     ctx.restore();
+
+    if (game.state === 'intro') drawIntro(ctx, game);
 
     if (game.state === 'playing' && ((game.mode === 1 && game.timeLeft < 30) || game.suddenDeath)) {
       ctx.save();
