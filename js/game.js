@@ -277,21 +277,25 @@ class Game {
   showHelp() {
     this.state = 'setup';
     const touch = this.ui.isTouch();
-    this.ui.showOverlay({
-      title: 'HOW TO PLAY',
-      text:
-        (touch
-          ? 'Move with the D-pad, drop bombs with the big button.\n'
-          : 'Move with W A S D or the arrow keys, drop bombs with Space.\nGamepads work too: D-pad or stick to move, A to bomb, B to detonate.\n') +
+    const text = touch
+      ? 'Move with the D-pad, drop bombs with the big button.\n' +
+        'Campaign: clear the enemies, then find the exit under a brick. Every fifth stage is a boss.\n' +
+        'Battle: last one standing wins the round.\n\n' +
+        '💣 extra bomb   🔥 bigger flames   ⚡ speed   👟 kick bombs\n' +
+        '📡 remote bombs (bomb button again detonates)\n' +
+        '👻 walk through bricks   ❤ extra life   💀 random curse'
+      : 'Move with W A S D or the arrow keys, drop bombs with Space.\n' +
+        'Gamepads work too: D-pad or stick to move, A to bomb, B to detonate.\n' +
         'Bombs explode in a cross and destroy bricks, enemies and players.\n' +
         'Campaign: defeat every enemy, then find the exit hidden under a brick.\n' +
         'Every fifth stage is a boss: hit it with flames until its health bar is empty.\n' +
         'Battle: last one standing wins the round.\n\n' +
         'Power-ups:  💣 extra bomb   🔥 bigger flames   ⚡ speed\n' +
-        '👟 kick bombs   📡 remote bombs (bomb key again' +
-        (touch ? '' : ' or E') +
-        ' to detonate)\n' +
-        '👻 walk through bricks   ❤ extra life   💀 a random curse for 15 s',
+        '👟 kick bombs   📡 remote bombs (bomb key again or E to detonate)\n' +
+        '👻 walk through bricks   ❤ extra life   💀 a random curse for 15 s';
+    this.ui.showOverlay({
+      title: 'HOW TO PLAY',
+      text,
       buttons: [{ label: 'BACK', action: () => this.showTitle(), back: true }],
       help: this.keyHint('Esc or Enter to go back'),
     });
