@@ -1,8 +1,9 @@
 # Bomberman Clone
 
 A browser-based Bomberman clone written in plain HTML5 Canvas and JavaScript.
-No build step, no dependencies. Works on desktop and mobile, and installs as a
-PWA for offline play.
+No build step, no dependencies. Works on desktop (keyboard or gamepad) and
+mobile (touch), and installs as a PWA for offline play. Music and sound
+effects are generated procedurally with the Web Audio API.
 
 ## Play
 
@@ -21,9 +22,16 @@ keeps working offline and can be added to a phone's home screen.
 ### Campaign
 
 Blast bricks, defeat every enemy, then step on the exit hidden under a brick.
-Five themed worlds of five levels each (Green Fields, Frozen Depths, Desert
-Ruins, Iron Works, Magma Core), each with hand-designed layouts. After the
-last world the campaign loops with more enemies.
+Five themed worlds of five stages each (Green Fields, Frozen Depths, Desert
+Ruins, Iron Works, Magma Core), each with hand-designed layouts and its own
+music. Every fifth stage is a boss fight: a large enemy with a health bar that
+takes several hits, shrugs off damage for a moment after each one, and calls
+in minions. Beating a boss unlocks the next world, and unlocked worlds can be
+started directly from the world select. After the last world the campaign
+loops with more enemies.
+
+Each stage opens with a Ready/Go card and ends with a score tally (stage
+bonus, time bonus, enemies defeated) and a one-to-three star time rating.
 
 Pick a difficulty:
 
@@ -60,9 +68,21 @@ slowly and make mistakes; hard bots do not.
 Global: `P` / `Esc` pause, `M` mute, `R` back to the menu. Menus can be driven
 with the number keys, arrows, `Enter` and `Esc`.
 
+Gamepads: the first pad controls Player 1 and the second Player 2. D-pad or
+left stick moves, `A` drops a bomb, `B` detonates remote bombs, `Start`
+pauses. In menus `A` confirms and `B` goes back.
+
 On touch devices a virtual D-pad, bomb button and pause button appear
 automatically; the 🎮 button in the HUD toggles them manually. Landscape
 phones get the D-pad and buttons on either side of the board.
+
+## Options
+
+The Options menu sets music and sound volume, screen shake, and whether the
+touch controls are shown (auto, on, off), and can reset saved progress.
+Settings, high scores, best stages, unlocked worlds and battle wins are stored
+in the browser's localStorage. The title screen runs an attract-mode battle
+between four bots.
 
 ## Power-ups
 
@@ -93,6 +113,17 @@ power-ups, so grab them quickly.
 | Pass (orange diamond) | 4000 | fast, walks over bombs, dodges |
 | Pontan (white star) | 8000 | fastest, passes everything |
 
+## Tests
+
+`tests/e2e.js` is a headless Playwright smoke test that drives the real page:
+menus, campaign, boss fight, world unlock, battle with bots, sudden death,
+power-ups, persistence and touch controls.
+
+```sh
+npm i -g playwright && npx playwright install chromium
+node tests/e2e.js
+```
+
 ## Project layout
 
 ```
@@ -104,12 +135,15 @@ icons/            app icons
 js/constants.js   tuning, difficulty, enemy roster, themes, worlds
 js/storage.js     localStorage settings and records
 js/audio.js       procedural Web Audio sound effects
-js/input.js       keyboard state (also fed by touch controls)
+js/music.js       procedural chiptune tracks and scheduler
+js/input.js       keyboard state (also fed by touch and gamepad)
 js/touch.js       virtual D-pad and buttons
+js/gamepad.js     Gamepad API polling
 js/level.js       layout templates, level building, sudden-death spiral
-js/entities.js    Player, Enemy, Bomb, Explosion, PowerUp, effects
+js/entities.js    Player, Enemy, Boss, Bomb, Explosion, PowerUp, effects
 js/bot.js         bot AI (danger map, time-aware BFS, decision loop)
 js/render.js      canvas drawing, themes, high-DPI scaling
-js/game.js        menus, rules, state machine, collisions
+js/game.js        menus, rules, state machine, collisions, attract mode
 js/main.js        HUD/overlay glue, device handling, game loop
+tests/e2e.js      headless browser test suite
 ```

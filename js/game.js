@@ -480,7 +480,9 @@ class Game {
     const boss = this.isBossLevel();
     const count = boss ? 2 : Math.min(14, this.diff.enemyCount(this.level) + loop * 2);
     const entry = this.pacingPool();
-    const pool = entry.pool;
+    // Boss stages keep the fast wall-passing Pontans out so the boss is the threat.
+    const pool = boss ? entry.pool.filter((t) => t !== 'pontan') : entry.pool;
+    if (!pool.length) pool.push('balloom');
     const smartPool = pool.filter((t) => ENEMY_TYPES[t].smart);
     const list = [];
     for (let i = 0; i < count; i++) {
@@ -714,6 +716,9 @@ class Game {
     if (this.handleGlobalKeys()) return;
 
     if (this.state === 'levelclear') this.updateResults(dt);
+    if (this.state === 'levelclear' || this.state === 'roundover' || this.state === 'gameover' || this.state === 'paused') {
+      this.updateEffects(dt);
+    }
     if (this.state === 'intro') {
       this.updateIntro(dt);
       this.updateEffects(dt);
@@ -796,7 +801,7 @@ class Game {
     if (b.minionTimer <= 0) {
       b.minionTimer = BOSS_MINION_INTERVAL;
       if (this.enemiesRemaining() < 5) {
-        const pool = this.pacingPool().pool.filter((t) => !ENEMY_TYPES[t].passBricks);
+        const pool = this.pacingPool().pool.filter((t) => !ENEMY_TYPES[t].passBricks && t !== 'pontan');
         const spawns = this.players.map((p) => ({ x: p.tx, y: p.ty }));
         const e = this.spawnEnemy(randomItem(pool.length ? pool : ['balloom']), spawns, this.diff.speedMult);
         if (e) {
