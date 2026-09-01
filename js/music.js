@@ -156,7 +156,10 @@ class Music {
       return;
     }
     const stepDur = 60 / tr.bpm / 2;
-    while (this.nextTime < this.ctx.currentTime + 0.35) {
+    const now = this.ctx.currentTime;
+    // After a stall, skip ahead instead of dumping every missed note at once.
+    if (this.nextTime < now - 0.2) this.nextTime = now + 0.05;
+    while (this.nextTime < now + 0.35) {
       this.scheduleStep(tr, this.step, this.nextTime, stepDur);
       this.step++;
       this.nextTime += stepDur;

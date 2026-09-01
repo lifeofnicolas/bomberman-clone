@@ -524,11 +524,10 @@ const Renderer = (() => {
     const cy = e.y + bob;
     const shape = e.cfg.shape;
     ctx.save();
-    if (e.isBoss && e.alive && e.iframes > 0 && Math.floor(e.iframes / 80) % 2 === 0) {
-      ctx.filter = 'brightness(2.2)';
-    }
+    const flash = e.isBoss && e.alive && e.iframes > 0 && Math.floor(e.iframes / 80) % 2 === 0;
     if (e.dying) {
-      const t = 1 - e.deathTimer / ENEMY_DEATH_DURATION;
+      const dur = e.isBoss ? ENEMY_DEATH_DURATION * 2 : ENEMY_DEATH_DURATION;
+      const t = 1 - e.deathTimer / dur;
       ctx.globalAlpha = 1 - t;
       ctx.translate(cx, cy);
       ctx.scale(1 + t * 0.6, 1 + t * 0.6);
@@ -543,6 +542,10 @@ const Renderer = (() => {
     ctx.fillStyle = e.color;
     bodyPath(ctx, shape, cx, cy, r, e.animTime);
     ctx.fill();
+    if (flash) {
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fill();
+    }
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.lineWidth = 2;
     ctx.stroke();

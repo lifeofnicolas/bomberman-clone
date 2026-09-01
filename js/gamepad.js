@@ -14,6 +14,7 @@ class GamepadInput {
     this.input = input;
     this.isMenu = isMenu; // () => boolean, true while a menu is open
     this.held = [new Set(), new Set()];
+    this.menuMode = [null, null];
     this.connected = 0;
     this.onConnect = null;
     window.addEventListener('gamepadconnected', (e) => {
@@ -36,10 +37,15 @@ class GamepadInput {
     let slot = 0;
     for (const pad of pads) {
       if (!pad || !pad.connected || slot >= PAD_MAPS.length) continue;
-      this.apply(slot, this.codesFor(pad, PAD_MAPS[slot], slot === 0 && this.isMenu()));
+      const menu = slot === 0 && this.isMenu();
+      // When the menu/game mapping flips while a button is held, carry the
+      // hold over without generating a fresh press.
+      const remapped = this.menuMode[slot] !== null && this.menuMode[slot] !== menu;
+      this.menuMode[slot] = menu;
+      this.apply(slot, this.codesFor(pad, PAD_MAPS[slot], menu), remapped);
       slot++;
     }
-    for (let i = slot; i < this.held.length; i++) this.apply(i, new Set());
+    for (let i = slot; i < this.held.length; i++) this.apply(i, new Set(), false);
   }
 
   codesFor(pad, map, menu) {
@@ -62,10 +68,17 @@ class GamepadInput {
     return codes;
   }
 
-  apply(slot, codes) {
+  apply(slot, codes, remapped) {
     const prev = this.held[slot];
     for (const c of prev) if (!codes.has(c)) this.input.release(c);
-    for (const c of codes) if (!prev.has(c)) this.input.press(c);
+    for (const c of codes) {
+      if (!prev.has(c)) {
+        if (remapped) this.input.down.add(c);
+        else this.input.press(c);
+      } else if (!this.input.down.has(c)) {
+        this.input.down.add(c); // re-sync after a blur cleared the set
+      }
+    }
     this.held[slot] = codes;
   }
 }

@@ -55,13 +55,14 @@ class UI {
     for (const b of buttons) {
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.tabIndex = -1; // keyboard handling is done by the game, not the DOM
       btn.textContent = b.label;
       btn.addEventListener('click', () => {
         btn.blur();
         this.fire(b);
       });
       this.overlayButtons.appendChild(btn);
-      this.buttons.push({ el: btn, action: b.action, back: !!b.back });
+      this.buttons.push({ el: btn, action: b.action, back: !!b.back, cycle: !!b.cycle });
     }
     this.overlay.classList.add('visible');
     this.focusButton(typeof focus === 'number' && focus >= 0 ? focus : 0);
@@ -100,11 +101,11 @@ class UI {
   }
 
   // Enter/Space activates the focused button. With `cycleOnly`, only buttons
-  // that are neither primary nor "back" respond (used for left/right arrows).
+  // flagged as option cyclers respond (used for left/right arrows).
   activateFocused(cycleOnly = false) {
     const b = this.buttons[this.focusIndex];
     if (!b) return false;
-    if (cycleOnly && (this.focusIndex === 0 || b.back)) return false;
+    if (cycleOnly && !b.cycle) return false;
     this.fire(b);
     return true;
   }
@@ -286,14 +287,20 @@ class UI {
 
   let last = performance.now();
   function frame(now) {
+    requestAnimationFrame(frame);
     let dt = (now - last) / 1000;
     last = now;
     if (dt > 0.05) dt = 0.05; // avoid huge steps after a tab switch
-    pads.poll();
-    game.update(dt);
-    game.render();
-    input.endFrame();
-    requestAnimationFrame(frame);
+    try {
+      pads.poll();
+      game.update(dt);
+      game.render();
+    } catch (err) {
+      // Never let a single bad frame kill the loop.
+      console.error(err);
+    } finally {
+      input.endFrame();
+    }
   }
   requestAnimationFrame(frame);
 })();

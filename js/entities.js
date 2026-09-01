@@ -252,6 +252,12 @@ class Enemy {
     const ttx = tileOf(this.target.x);
     const tty = tileOf(this.target.y);
     if (game.isSolidFor(ttx, tty, this) && (this.tx !== ttx || this.ty !== tty)) {
+      if (game.isSolidFor(this.origin.x, this.origin.y, this)) {
+        // Both ends blocked: wait where we are and re-plan shortly.
+        this.target = null;
+        this.wait = 0.25;
+        return;
+      }
       this.target = { x: centerOf(this.origin.x), y: centerOf(this.origin.y) };
       this.dir = OPPOSITE[this.dir];
     }
@@ -349,6 +355,7 @@ class Bomb {
     this.exploded = false;
     this.slideDir = null;
     this.slideTarget = null;
+    this.orphan = false; // true once the owner's power reset stops counting it
     // Entities that were standing on the bomb when it was placed may walk off it.
     this.walkers = new Set();
   }

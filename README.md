@@ -97,8 +97,8 @@ power-ups, so grab them quickly.
 - 👻 **Wall Pass** – walk through bricks
 - ❤ **Extra Life** – campaign only
 - 💀 **Skull** – a random 15-second curse: reversed controls, uncontrollable
-  bombing, no bombs, or slow motion. In battle, touching another player passes
-  the curse on.
+  bombing (with normal fuses, even if you hold the remote), no bombs, or slow
+  motion. In battle, touching another player passes the curse on.
 
 ## Enemies
 

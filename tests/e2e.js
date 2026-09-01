@@ -179,6 +179,67 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await press(page, 'Enter', 200);
   check('next round', await page.evaluate(() => game.level === 2 && game.state === 'intro'));
 
+  // Regression checks from review/stress findings
+  await page.evaluate(() => { game.settings.progress.normal = 1; game.settings.difficulty = 'normal'; game.showTitle(); });
+  await press(page, 'Digit1'); // campaign setup, focus on current difficulty
+  await press(page, 'ArrowRight');
+  check('left/right do not fire non-cycle buttons', (await state(page)) === 'setup' && (await title(page)) === 'CAMPAIGN');
+  await press(page, 'Digit2', 150); // start normal -> intro
+  await press(page, 'KeyP');
+  check('pause during intro', (await state(page)) === 'paused');
+  await press(page, 'KeyP');
+  check('resume returns to intro', (await state(page)) === 'intro' && (await page.evaluate(() => !!game.intro)));
+  await page.waitForTimeout(2600);
+  check('intro then completes', (await state(page)) === 'playing' && (await page.evaluate(() => game.intro === null)));
+  await page.evaluate(() => game.showTitle());
+  check('menu resets music duck', await page.evaluate(() => game.music.duck === 1));
+
+  // Bot with a remote bomb must walk away and detonate instead of freezing
+  await page.evaluate(() => {
+    game.settings.battle = { humans: 1, bots: 1, skill: 'hard' };
+    game.startBattle();
+    game.state = 'playing'; game.intro = null;
+    const bot = game.players[1];
+    bot.remote = true; bot.shield = 0;
+    game.players[0].shield = 99999;
+    game.enemies.forEach((e) => game.killEnemy(e, null)); // isolate: no monsters
+    window.__det = 0;
+    const orig = game.detonate.bind(game);
+    game.detonate = (p) => { window.__det++; return orig(p); };
+    window.__selfKill = 0;
+    const origKill = game.killPlayer.bind(game);
+    game.killPlayer = (p, f) => { if (p === bot) window.__selfKill++; return origKill(p, f); };
+  });
+  await page.waitForTimeout(6000);
+  const remoteBot = await page.evaluate(() => {
+    const bot = game.players[1];
+    return { alive: bot.alive, selfKill: window.__selfKill, detonations: window.__det, stuck: game.bombs.some((b) => b.owner === bot && b.remote && b.age > 4), bricks: tilesOfType(game.grid, TILE_BRICK).length };
+  });
+  check('remote-bomb bot detonates and survives', remoteBot.alive && remoteBot.selfKill === 0 && remoteBot.detonations >= 1 && !remoteBot.stuck, JSON.stringify(remoteBot));
+
+  // Hard mode death resets powers without stranding bomb count
+  await page.evaluate(() => {
+    game.showTitle(); game.startCampaign('hard', 0); game.state = 'playing'; game.intro = null;
+    const p = game.players[0]; p.maxBombs = 3; p.lives = 3;
+    for (let i = 0; i < 3; i++) game.bombs.push(new Bomb(3 + i * 2, 1, p, 1, 2500));
+    p.bombsActive = 3;
+    game.killPlayer(p, true);
+  });
+  await page.waitForTimeout(100);
+  check('power reset clears active bomb count', await page.evaluate(() => game.players[0].bombsActive === 0 && game.players[0].maxBombs === 1 && game.bombs.every((b) => b.orphan)));
+  await page.waitForTimeout(2700);
+  check('orphan bombs explode without underflow', await page.evaluate(() => game.bombs.length === 0 && game.players[0].bombsActive === 0));
+
+  // Corrupt save is sanitized
+  await page.evaluate(() => localStorage.setItem('bomberman.v1', JSON.stringify({ difficulty: 'ultra', battle: { humans: 9, bots: -2, skill: 'expert' }, musicVolume: 'loud', sfxVolume: 7, highScores: { easy: null }, progress: { normal: 99 } })));
+  await page.reload(); await page.waitForTimeout(300);
+  check('corrupt save sanitized', await page.evaluate(() => {
+    const s = game.settings;
+    return s.difficulty === 'normal' && s.battle.humans === 2 && s.battle.bots === 0 && s.battle.skill === 'normal' && s.musicVolume === 0.5 && s.sfxVolume === 1 && s.highScores.easy === 0 && s.progress.normal === 5;
+  }), await page.evaluate(() => JSON.stringify(game.settings)));
+  await press(page, 'Digit2');
+  check('battle setup renders with sanitized save', (await title(page)) === 'BATTLE');
+
   // Persistence shape: old save without new keys
   await page.evaluate(() => localStorage.setItem('bomberman.v1', JSON.stringify({ muted: true, battle: { humans: 2 } })));
   await page.reload(); await page.waitForTimeout(300);

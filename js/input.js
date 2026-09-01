@@ -10,6 +10,13 @@ class Input {
     this.onAny = null; // callback fired on every key press (used to unlock audio)
 
     window.addEventListener('keydown', (e) => {
+      // A clicked HUD/overlay button keeps DOM focus; without this, Enter or
+      // Space would re-click it as well as acting in the game.
+      const ae = document.activeElement;
+      if (ae && ae.tagName === 'BUTTON') {
+        ae.blur();
+        if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') e.preventDefault();
+      }
       if (PREVENT_DEFAULT_KEYS.has(e.code)) e.preventDefault();
       if (e.repeat) return;
       this.down.add(e.code);

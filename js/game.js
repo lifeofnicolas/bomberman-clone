@@ -77,6 +77,7 @@ class Game {
   showTitle() {
     this.state = 'title';
     this.ui.buildHud([], 1);
+    this.music.setDuck(1);
     this.music.play('title');
     if (!this.demo) this.startDemo();
     const hs = this.settings.highScores;
@@ -163,6 +164,7 @@ class Game {
       buttons: [
         { label: 'START', action: () => this.startBattle() },
         {
+          cycle: true,
           label: `HUMANS: ${b.humans}`,
           action: () => {
             b.humans = b.humans === 1 ? 2 : 1;
@@ -170,6 +172,7 @@ class Game {
           },
         },
         {
+          cycle: true,
           label: `BOTS: ${b.bots}`,
           action: () => {
             b.bots = b.bots + 1 > maxBots ? minBots : b.bots + 1;
@@ -177,6 +180,7 @@ class Game {
           },
         },
         {
+          cycle: true,
           label: `BOT SKILL: ${BOT_TIERS[b.skill].label.toUpperCase()}`,
           action: () => {
             const i = DIFFICULTY_ORDER.indexOf(b.skill);
@@ -208,6 +212,7 @@ class Game {
       text: 'Settings are saved in this browser.',
       buttons: [
         {
+          cycle: true,
           label: `MUSIC: ${pct(s.musicVolume)}`,
           action: () => {
             s.musicVolume = cycleVolume(s.musicVolume);
@@ -216,6 +221,7 @@ class Game {
           },
         },
         {
+          cycle: true,
           label: `SOUND: ${pct(s.sfxVolume)}`,
           action: () => {
             s.sfxVolume = cycleVolume(s.sfxVolume);
@@ -224,6 +230,7 @@ class Game {
           },
         },
         {
+          cycle: true,
           label: `SCREEN SHAKE: ${s.shake ? 'ON' : 'OFF'}`,
           action: () => {
             s.shake = !s.shake;
@@ -231,6 +238,7 @@ class Game {
           },
         },
         {
+          cycle: true,
           label: `TOUCH CONTROLS: ${touchLabel}`,
           action: () => {
             s.touchUI = s.touchUI === null || s.touchUI === undefined ? true : s.touchUI ? false : null;
@@ -419,7 +427,9 @@ class Game {
 
     // Enemies
     const roster = battle ? this.battleRoster() : this.campaignRoster();
-    for (const type of roster) this.spawnEnemy(type, spawns, battle ? 1 : this.diff.speedMult);
+    const bossHome = { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) };
+    const rosterSpawns = !battle && this.isBossLevel() ? [...spawns, bossHome] : spawns;
+    for (const type of roster) this.spawnEnemy(type, rosterSpawns, battle ? 1 : this.diff.speedMult);
 
     if (!battle && this.isBossLevel()) {
       const s = this.campaignStage();
@@ -508,6 +518,7 @@ class Game {
   // ------------------------------------------------------------------
   pause() {
     if (this.state !== 'playing' && this.state !== 'intro') return;
+    this.pausedFrom = this.state;
     this.state = 'paused';
     this.music.setDuck(0.3);
     this.ui.showOverlay({
@@ -523,7 +534,7 @@ class Game {
 
   resume() {
     if (this.state !== 'paused') return;
-    this.state = 'playing';
+    this.state = this.pausedFrom === 'intro' && this.intro ? 'intro' : 'playing';
     this.music.setDuck(1);
     this.ui.hideOverlay();
   }
@@ -650,7 +661,7 @@ class Game {
       title: 'GAME OVER',
       text: `Final score: ${p.score}\nReached ${THEMES[s.theme].name} ${s.world + 1}-${s.stage + 1} (${DIFFICULTY[this.difficulty].label})` + (newBest ? '\n★ New high score!' : ''),
       buttons: [
-        { label: 'RETRY WORLD', action: () => this.startCampaign(this.difficulty, Math.min(s.world, WORLD_ORDER.length - 1)) },
+        { label: 'RETRY WORLD', action: () => this.startCampaign(this.difficulty, s.world) },
         { label: 'MAIN MENU', action: () => this.showTitle(), back: true },
       ],
       help: this.keyHint('Press Enter or Space to retry'),
@@ -872,7 +883,7 @@ class Game {
     for (const b of this.bombs.slice()) {
       if (b.tx === x && b.ty === y) {
         this.bombs = this.bombs.filter((o) => o !== b);
-        b.owner.bombsActive = Math.max(0, b.owner.bombsActive - 1);
+        if (!b.orphan) b.owner.bombsActive = Math.max(0, b.owner.bombsActive - 1);
       }
     }
     this.powerups = this.powerups.filter((pu) => !(pu.tx === x && pu.ty === y));
@@ -928,15 +939,34 @@ class Game {
 
   slideBomb(b, dt) {
     const v = DIRS[b.slideDir];
+    const ttx = tileOf(b.slideTarget.x);
+    const tty = tileOf(b.slideTarget.y);
+    if (this.grid[tty][ttx] !== TILE_EMPTY) {
+      // A sudden-death block landed ahead of us: settle back on the current tile.
+      b.x = centerOf(b.tx);
+      b.y = centerOf(b.ty);
+      b.slideDir = null;
+      b.slideTarget = null;
+      return;
+    }
     const step = KICK_SPEED * dt;
     const dx = b.slideTarget.x - b.x;
     const dy = b.slideTarget.y - b.y;
     if (Math.abs(dx) + Math.abs(dy) <= step) {
       b.x = b.slideTarget.x;
       b.y = b.slideTarget.y;
+      // Anyone who stepped onto this tile mid-slide may walk off it, and the
+      // bomb stops here rather than dragging them along.
+      let occupied = false;
+      for (const e of [...this.players, ...this.enemies]) {
+        if (e.alive && this.overlapsTile(e, b.tx, b.ty)) {
+          b.walkers.add(e);
+          occupied = true;
+        }
+      }
       const nx = b.tx + v.dx;
       const ny = b.ty + v.dy;
-      if (this.canBombEnter(nx, ny, b)) {
+      if (!occupied && this.canBombEnter(nx, ny, b)) {
         b.slideTarget = { x: centerOf(nx), y: centerOf(ny) };
       } else {
         b.slideDir = null;
@@ -1010,7 +1040,8 @@ class Game {
       case 'levelclear':
       case 'roundover':
       case 'gameover': {
-        const confirm = inp.wasPressed(['Enter', 'NumpadEnter', 'Space']);
+        // On touch devices the bomb button emits Space; it should not double as menu confirm.
+        const confirm = inp.wasPressed(['Enter', 'NumpadEnter']) || (!this.ui.isTouch() && inp.wasPressed('Space'));
         if (this.state === 'levelclear' && this.results && !this.results.done && (confirm || pressedDigit() >= 0)) {
           this.finishResults();
           return true;
@@ -1019,9 +1050,10 @@ class Game {
         if (d >= 0) return this.ui.activateButton(d);
         if (confirm) return this.ui.activateFocused();
         if (inp.wasPressed(['Escape', 'Backspace'])) return this.ui.backAction();
+        const vertical = inp.wasPressed(['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS']);
         if (inp.wasPressed(['ArrowUp', 'KeyW'])) this.ui.focusMove(-1);
         if (inp.wasPressed(['ArrowDown', 'KeyS'])) this.ui.focusMove(1);
-        if (inp.wasPressed(['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'])) return this.ui.activateFocused(true);
+        if (!vertical && inp.wasPressed(['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'])) return this.ui.activateFocused(true);
         if (this.state !== 'title' && this.state !== 'setup' && inp.wasPressed('KeyR')) {
           this.showTitle();
           return true;
@@ -1083,6 +1115,8 @@ class Game {
     p.dying = false;
     if (this.mode === 1 && p.lives > 0) {
       p.respawn();
+      const onBomb = this.bombAt(p.tx, p.ty);
+      if (onBomb) onBomb.walkers.add(p);
     }
   }
 
@@ -1164,7 +1198,9 @@ class Game {
     const ty = p.ty;
     if (this.grid[ty][tx] !== TILE_EMPTY || this.bombAt(tx, ty)) return false;
 
-    const fuse = p.remote ? Infinity : this.mode === 1 ? this.diff.bombFuse : BOMB_FUSE;
+    // Bombs dropped by the diarrhea curse always use a normal fuse; a trail of
+    // remote bombs would box the cursed player (or bot) in.
+    const fuse = p.remote && !p.hasCurse('diarrhea') ? Infinity : this.mode === 1 ? this.diff.bombFuse : BOMB_FUSE;
     const bomb = new Bomb(tx, ty, p, p.range, fuse);
     for (const e of [...this.players, ...this.enemies]) {
       if (e.alive && this.overlapsTile(e, tx, ty)) bomb.walkers.add(e);
@@ -1184,7 +1220,7 @@ class Game {
     if (bomb.exploded) return;
     bomb.exploded = true;
     this.bombs = this.bombs.filter((b) => b !== bomb);
-    bomb.owner.bombsActive = Math.max(0, bomb.owner.bombsActive - 1);
+    if (!bomb.orphan) bomb.owner.bombsActive = Math.max(0, bomb.owner.bombsActive - 1);
 
     const powerupsBefore = this.powerups.slice();
     const cells = [{ x: bomb.tx, y: bomb.ty, dir: null, end: false }];
@@ -1295,14 +1331,19 @@ class Game {
     p.deathTimer = RESPAWN_DELAY;
     p.lives = Math.max(0, p.lives - 1);
     p.curse = null;
-    if (this.mode === 1 && this.diff.losePowersOnDeath) p.resetPowers();
-    // Remote bombs left behind get a normal fuse.
+    const resetPowers = this.mode === 1 && this.diff.losePowersOnDeath;
+    if (resetPowers) p.resetPowers();
     for (const b of this.bombs) {
-      if (b.owner === p && b.remote) {
+      if (b.owner !== p) continue;
+      // Remote bombs left behind get a normal fuse.
+      if (b.remote) {
         b.remote = false;
         b.timer = 1000;
       }
+      // Bombs from before a power reset no longer count against the new limit.
+      if (resetPowers) b.orphan = true;
     }
+    if (resetPowers) p.bombsActive = 0;
     this.spawnParticles(p.x, p.y, 14, ['#ffffff', p.color, '#eceff1'], 160);
     this.addShake(6);
     this.freeze = 90;

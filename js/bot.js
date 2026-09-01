@@ -83,7 +83,7 @@ function botBlastCells(game, tx, ty, range) {
 }
 
 // danger[y][x] = { hitAt, clearAt } in ms from now. hitAt === Infinity means safe.
-function botDangerMap(game, cfg, extraBomb) {
+function botDangerMap(game, cfg, extraBomb, self = null) {
   const d = [];
   for (let y = 0; y < ROWS; y++) {
     const row = [];
@@ -91,8 +91,15 @@ function botDangerMap(game, cfg, extraBomb) {
     d.push(row);
   }
 
-  // Remote bombs have no fuse; assume they could go off soon.
-  const bombs = game.bombs.map((b) => ({ tx: b.tx, ty: b.ty, range: b.range, t: Number.isFinite(b.timer) ? b.timer : 1500 }));
+  // Remote bombs have no fuse. Ours only go off when we detonate them, so plan
+  // a leisurely escape; anyone else's could go off at any moment.
+  const bombs = game.bombs.map((b) => ({
+    tx: b.tx,
+    ty: b.ty,
+    range: b.range,
+    remote: b.remote,
+    t: Number.isFinite(b.timer) ? b.timer : b.owner === self ? 4000 : 1500,
+  }));
   if (extraBomb) bombs.push({ tx: extraBomb.tx, ty: extraBomb.ty, range: extraBomb.range, t: extraBomb.timer });
   const cells = bombs.map((b) => botBlastCells(game, b.tx, b.ty, b.range));
 
@@ -115,7 +122,7 @@ function botDangerMap(game, cfg, extraBomb) {
   }
 
   bombs.forEach((b, i) => {
-    if (b.t > cfg.lookahead) return;
+    if (!b.remote && b.t > cfg.lookahead) return;
     for (const c of cells[i]) {
       const e = d[c.y][c.x];
       e.hitAt = Math.min(e.hitAt, b.t);
@@ -150,7 +157,7 @@ function botDangerMap(game, cfg, extraBomb) {
         if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
         const cell = d[y][x];
         cell.hitAt = 0;
-        cell.clearAt = Math.max(cell.clearAt, 400);
+        cell.clearAt = Math.max(cell.clearAt, 800);
       }
     }
   }
@@ -194,7 +201,7 @@ class Bot {
 
     if (atCentre || this.replanTimer <= 0 || this.path.length === 0 || this.pathBlocked(game)) {
       this.replanTimer = cfg.replanInterval;
-      const d = botDangerMap(game, cfg, null);
+      const d = botDangerMap(game, cfg, null, p);
       const here = d[p.ty][p.tx];
       const inDanger = here.hitAt !== Infinity && this.reaction <= 0;
 
@@ -218,8 +225,28 @@ class Bot {
     const own = game.bombs.filter((b) => b.owner === p && b.remote);
     if (!own.length) return;
     const bomb = own[0];
-    const cells = botBlastCells(game, bomb.tx, bomb.ty, bomb.range);
-    if (cells.some((c) => c.x === p.tx && c.y === p.ty)) return;
+    // Everything that would go off together: the bomb plus any bombs its
+    // flames reach, transitively (chain reactions).
+    const chained = new Set([bomb]);
+    const cells = [];
+    const queue = [bomb];
+    while (queue.length) {
+      const b = queue.shift();
+      for (const c of botBlastCells(game, b.tx, b.ty, b.range)) {
+        cells.push(c);
+        const other = game.bombAt(c.x, c.y);
+        if (other && !chained.has(other)) {
+          chained.add(other);
+          queue.push(other);
+        }
+      }
+    }
+    // Stay well clear: our body must be at least a few pixels outside every
+    // blast tile, and we must not be walking into one.
+    const reach = TILE / 2 + 12;
+    if (cells.some((c) => Math.abs(p.x - centerOf(c.x)) < reach && Math.abs(p.y - centerOf(c.y)) < reach)) return;
+    const next = this.path[0];
+    if (next && cells.some((c) => c.x === next.x && c.y === next.y)) return;
     const opponentHit = game.players.some((o) => o !== p && o.alive && cells.some((c) => c.x === o.tx && c.y === o.ty));
     if (opponentHit || bomb.age > 1.5) this.input.pressed.add(p.keys.detonate[0]);
   }
@@ -260,10 +287,12 @@ class Bot {
   // ------------------------------------------------------------------
   // Time-aware BFS over walkable tiles. Returns nodes in BFS order; each
   // node has { x, y, t (arrival ms), dist, prev }.
-  bfs(game, d, maxDist) {
+  // With `relaxed`, only require arriving before the flames (no safety margin
+  // and no need to leave in time). Used as a last resort when trapped.
+  bfs(game, d, maxDist, relaxed = false) {
     const p = this.player;
     const tileTime = (TILE / p.speed) * 1000;
-    const margin = this.cfg.margin;
+    const margin = relaxed ? 0 : this.cfg.margin;
     const start = { x: p.tx, y: p.ty, t: 0, dist: 0, prev: null };
     const seen = new Set([tileKey(start.x, start.y)]);
     const queue = [start];
@@ -280,9 +309,12 @@ class Bot {
         const k = tileKey(x, y);
         if (seen.has(k)) continue;
         if (game.grid[y][x] !== TILE_EMPTY || game.bombAt(x, y)) continue;
-        const t = n.t + tileTime;
+        const t = n.t + tileTime; // arrival at the tile centre
+        const enter = t - tileTime / 2; // the game counts us inside once our centre crosses the edge
         const e = d[y][x];
-        const passable = t + tileTime + margin < e.hitAt || t > e.clearAt;
+        const passable = relaxed
+          ? enter < e.hitAt || enter > e.clearAt + 40
+          : t + tileTime + margin < e.hitAt || enter > e.clearAt + 60;
         if (!passable) continue;
         seen.add(k);
         queue.push({ x, y, t, dist: n.dist + 1, prev: n });
@@ -305,6 +337,9 @@ class Bot {
     const nodes = this.bfs(game, d, maxDist);
     const safe = nodes.find((n) => d[n.y][n.x].hitAt === Infinity);
     if (safe) return this.unwind(safe);
+    // No comfortable route: run for any tile we can reach before it burns.
+    const dash = this.bfs(game, d, maxDist, true).find((n) => d[n.y][n.x].hitAt === Infinity);
+    if (dash) return this.unwind(dash);
     // Trapped: go to the tile whose doom is furthest away.
     let best = null;
     let bestScore = -Infinity;
@@ -341,7 +376,7 @@ class Bot {
     const p = this.player;
     if (p.bombsActive >= p.maxBombs) return false;
     if (game.grid[p.ty][p.tx] !== TILE_EMPTY || game.bombAt(p.tx, p.ty)) return false;
-    const d = botDangerMap(game, this.cfg, { tx: p.tx, ty: p.ty, range: p.range, timer: BOMB_FUSE });
+    const d = botDangerMap(game, this.cfg, { tx: p.tx, ty: p.ty, range: p.range, timer: BOMB_FUSE }, p);
     const nodes = this.bfs(game, d, this.cfg.maxEscapeLen);
     const safe = nodes.find((n) => d[n.y][n.x].hitAt === Infinity);
     if (!safe) return false;
@@ -351,9 +386,14 @@ class Bot {
     return true;
   }
 
+  // A deliberate "mistake": ignore fuse timers, but never walk into visible fire.
   randomStep(game) {
     const p = this.player;
-    const options = DIR_LIST.filter((dir) => !game.isSolidFor(p.tx + DIRS[dir].dx, p.ty + DIRS[dir].dy, p));
+    const options = DIR_LIST.filter((dir) => {
+      const x = p.tx + DIRS[dir].dx;
+      const y = p.ty + DIRS[dir].dy;
+      return !game.isSolidFor(x, y, p) && game.dangerAt(x, y) !== 2;
+    });
     if (!options.length) return [];
     const dir = randomItem(options);
     return [{ x: p.tx + DIRS[dir].dx, y: p.ty + DIRS[dir].dy }];
