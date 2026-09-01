@@ -21,9 +21,11 @@ class Sfx {
         this.ctx = null;
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
+    // iOS reports 'interrupted' after a call or Control Center; treat any
+    // non-running state as something to resume.
+    if (this.ctx && this.ctx.state !== 'running') {
       this.ctx.resume().then(() => this.onReady && this.onReady()).catch(() => {});
-    } else if (this.ctx && this.ctx.state === 'running' && this.onReady) {
+    } else if (this.ctx && this.onReady) {
       this.onReady();
     }
   }
@@ -55,14 +57,16 @@ class Sfx {
     volume *= this.volume;
     if (volume <= 0) return;
     const ctx = this.ctx;
-    const length = Math.floor(ctx.sampleRate * duration);
-    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < length; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    if (!this.noiseBuffer) {
+      // One shared half-second noise buffer; the gain envelope shapes each hit.
+      const length = Math.floor(ctx.sampleRate * 0.5);
+      this.noiseBuffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
     }
+    duration = Math.min(duration, 0.5);
     const src = ctx.createBufferSource();
-    src.buffer = buffer;
+    src.buffer = this.noiseBuffer;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(1200, ctx.currentTime);
@@ -72,6 +76,7 @@ class Sfx {
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     src.connect(filter).connect(gain).connect(ctx.destination);
     src.start();
+    src.stop(ctx.currentTime + duration + 0.02);
   }
 
   placeBomb() {
