@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Game entities: players, enemies, bombs, explosions, power-ups.
+// Game entities: players, enemies, bombs, explosions, power-ups, effects.
 // Positions (x, y) are pixel coordinates of the entity's centre.
 // ---------------------------------------------------------------------------
 
@@ -25,36 +25,55 @@ class Player {
     this.lives = START_LIVES;
     this.score = 0;
     this.wins = 0;
+    this.kills = 0;
+    this.bot = null;
     this.resetPowers();
     this.resetForLevel();
+  }
+
+  get isBot() {
+    return !!this.bot;
   }
 
   resetPowers() {
     this.maxBombs = 1;
     this.range = 1;
     this.speedLevel = 1;
+    this.canKick = false;
+    this.remote = false;
+    this.wallPass = false;
+    this.curse = null;
+    this.curseImmune = 0;
   }
 
   // Put the player back on their spawn tile, alive and briefly invulnerable.
-  respawn() {
+  respawn(shieldMs = SPAWN_SHIELD) {
     this.x = centerOf(this.spawn.x);
     this.y = centerOf(this.spawn.y);
     this.alive = true;
     this.dying = false;
     this.deathTimer = 0;
-    this.shield = SPAWN_SHIELD;
+    this.shield = shieldMs;
     this.facing = 'down';
     this.moving = false;
     this.animTime = 0;
     this.lastAxis = 'y';
+    this.curse = null;
+    this.curseImmune = 0;
+    if (this.bot) this.bot.reset();
   }
 
-  resetForLevel() {
-    this.respawn();
+  resetForLevel(shieldMs = SPAWN_SHIELD) {
+    this.respawn(shieldMs);
     this.bombsActive = 0;
   }
 
+  hasCurse(type) {
+    return !!this.curse && this.curse.type === type;
+  }
+
   get speed() {
+    if (this.hasCurse('slow')) return BASE_SPEED * 0.6;
     return BASE_SPEED + (this.speedLevel - 1) * SPEED_STEP;
   }
 
@@ -68,13 +87,22 @@ class Player {
 
   update(dt, game, input) {
     this.shield = Math.max(0, this.shield - dt * 1000);
+    if (this.curse) {
+      this.curse.timer -= dt * 1000;
+      if (this.curse.timer <= 0) this.curse = null;
+    }
+    if (this.curseImmune > 0) this.curseImmune -= dt * 1000;
 
     const k = this.keys;
     if (input.wasPressed(k.left) || input.wasPressed(k.right)) this.lastAxis = 'x';
     if (input.wasPressed(k.up) || input.wasPressed(k.down)) this.lastAxis = 'y';
 
-    const dx = (input.isDown(k.right) ? 1 : 0) - (input.isDown(k.left) ? 1 : 0);
-    const dy = (input.isDown(k.down) ? 1 : 0) - (input.isDown(k.up) ? 1 : 0);
+    let dx = (input.isDown(k.right) ? 1 : 0) - (input.isDown(k.left) ? 1 : 0);
+    let dy = (input.isDown(k.down) ? 1 : 0) - (input.isDown(k.up) ? 1 : 0);
+    if (this.hasCurse('reverse')) {
+      dx = -dx;
+      dy = -dy;
+    }
     const both = dx !== 0 && dy !== 0;
     this.moving = dx !== 0 || dy !== 0;
 
@@ -99,8 +127,14 @@ class Player {
       this.animTime += dt;
     }
 
-    if (input.wasPressed(k.bomb)) {
+    if (this.hasCurse('diarrhea')) {
       game.tryPlaceBomb(this);
+    } else if (input.wasPressed(k.bomb)) {
+      if (this.remote && this.bombsActive >= this.maxBombs) game.detonate(this);
+      else game.tryPlaceBomb(this);
+    }
+    if (this.remote && k.detonate && input.wasPressed(k.detonate)) {
+      game.detonate(this);
     }
   }
 
@@ -125,13 +159,15 @@ class Player {
       }
       if (blocked) {
         nx = dir > 0 ? tx * TILE - h - EPS : (tx + 1) * TILE + h + EPS;
-        if (assist) {
-          const row = this.ty;
-          const cy = centerOf(row);
-          if (Math.abs(this.y - cy) > 0.5 && !game.isSolidFor(tx, row, this)) {
-            const step = Math.min(Math.abs(mx), Math.abs(cy - this.y));
-            this.y += Math.sign(cy - this.y) * step;
-          }
+        const row = this.ty;
+        const cy = centerOf(row);
+        if (this.canKick && Math.abs(this.y - cy) < TILE * 0.3) {
+          const bomb = game.bombAt(tx, row);
+          if (bomb && !bomb.walkers.has(this) && !bomb.slideDir) game.kickBomb(bomb, dir > 0 ? 'right' : 'left');
+        }
+        if (assist && Math.abs(this.y - cy) > 0.5 && !game.isSolidFor(tx, row, this)) {
+          const step = Math.min(Math.abs(mx), Math.abs(cy - this.y));
+          this.y += Math.sign(cy - this.y) * step;
         }
       }
       const moved = Math.abs(nx - this.x);
@@ -154,13 +190,15 @@ class Player {
       }
       if (blocked) {
         ny = dir > 0 ? ty * TILE - h - EPS : (ty + 1) * TILE + h + EPS;
-        if (assist) {
-          const col = this.tx;
-          const cx = centerOf(col);
-          if (Math.abs(this.x - cx) > 0.5 && !game.isSolidFor(col, ty, this)) {
-            const step = Math.min(Math.abs(my), Math.abs(cx - this.x));
-            this.x += Math.sign(cx - this.x) * step;
-          }
+        const col = this.tx;
+        const cx = centerOf(col);
+        if (this.canKick && Math.abs(this.x - cx) < TILE * 0.3) {
+          const bomb = game.bombAt(col, ty);
+          if (bomb && !bomb.walkers.has(this) && !bomb.slideDir) game.kickBomb(bomb, dir > 0 ? 'down' : 'up');
+        }
+        if (assist && Math.abs(this.x - cx) > 0.5 && !game.isSolidFor(col, ty, this)) {
+          const step = Math.min(Math.abs(my), Math.abs(cx - this.x));
+          this.x += Math.sign(cx - this.x) * step;
         }
       }
       const moved = Math.abs(ny - this.y);
@@ -174,12 +212,12 @@ class Player {
 
 // ---------------------------------------------------------------------------
 class Enemy {
-  constructor(type, tx, ty) {
+  constructor(type, tx, ty, speedMult = 1) {
     const cfg = ENEMY_TYPES[type];
     this.type = type;
     this.cfg = cfg;
     this.color = cfg.color;
-    this.speed = cfg.speed;
+    this.speed = cfg.speed * speedMult;
     this.x = centerOf(tx);
     this.y = centerOf(ty);
     this.half = TILE * 0.34;
@@ -236,7 +274,7 @@ class Enemy {
     const ty = this.ty;
     this.origin = { x: tx, y: ty };
 
-    const options = DIR_LIST.filter((d) => {
+    let options = DIR_LIST.filter((d) => {
       const v = DIRS[d];
       return !game.isSolidFor(tx + v.dx, ty + v.dy, this);
     });
@@ -247,7 +285,16 @@ class Enemy {
     }
 
     let choice = null;
-    if (this.cfg.smart) {
+    const flee = this.cfg.fleesBombs;
+    if (flee) {
+      const safe = options.filter((d) => game.dangerAt(tx + DIRS[d].dx, ty + DIRS[d].dy) === 0);
+      if (safe.length) options = safe;
+      if (game.dangerAt(tx, ty) > 0) {
+        // Standing in a blast line: prefer stepping out of it sideways.
+        choice = randomItem(options);
+      }
+    }
+    if (!choice && this.cfg.smart) {
       const chase = game.findPlayerDirection(tx, ty, 6);
       if (chase && options.includes(chase) && Math.random() < 0.8) choice = chase;
     }
@@ -268,24 +315,27 @@ class Enemy {
 
 // ---------------------------------------------------------------------------
 class Bomb {
-  constructor(tx, ty, owner, range) {
-    this.tx = tx;
-    this.ty = ty;
+  constructor(tx, ty, owner, range, fuse) {
+    this.x = centerOf(tx);
+    this.y = centerOf(ty);
     this.owner = owner;
     this.range = range;
-    this.timer = BOMB_FUSE;
+    this.timer = fuse;
+    this.remote = !Number.isFinite(fuse);
     this.age = 0;
     this.exploded = false;
+    this.slideDir = null;
+    this.slideTarget = null;
     // Entities that were standing on the bomb when it was placed may walk off it.
     this.walkers = new Set();
   }
 
-  get x() {
-    return centerOf(this.tx);
+  get tx() {
+    return tileOf(this.x);
   }
 
-  get y() {
-    return centerOf(this.ty);
+  get ty() {
+    return tileOf(this.y);
   }
 }
 
@@ -314,11 +364,43 @@ class PowerUp {
   }
 }
 
-// ---------------------------------------------------------------------------
 class BreakingBrick {
   constructor(tx, ty) {
     this.tx = tx;
     this.ty = ty;
     this.timer = BRICK_BREAK_DURATION;
+  }
+}
+
+class FallingBlock {
+  constructor(tx, ty) {
+    this.tx = tx;
+    this.ty = ty;
+    this.timer = FALLING_BLOCK_DURATION;
+  }
+}
+
+class Particle {
+  constructor(x, y, vx, vy, life, color, size) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.life = life;
+    this.maxLife = life;
+    this.color = color;
+    this.size = size;
+  }
+}
+
+class Floater {
+  constructor(text, x, y, color = '#ffffff', size = 14, life = 900) {
+    this.text = text;
+    this.x = x;
+    this.y = y;
+    this.color = color;
+    this.size = size;
+    this.life = life;
+    this.maxLife = life;
   }
 }

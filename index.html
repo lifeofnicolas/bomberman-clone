@@ -2,33 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#12141c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Bomberman" />
   <title>Bomberman Clone</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div id="app">
     <header id="hud">
-      <div class="hud-group" id="hud-p1">
-        <span class="hud-label p1">P1</span>
-        <span class="hud-stat" title="Lives">&#10084; <b id="hud-lives">3</b></span>
-        <span class="hud-stat" title="Bombs">&#128163; <b id="hud-bombs">1</b></span>
-        <span class="hud-stat" title="Flame range">&#128293; <b id="hud-range">1</b></span>
-        <span class="hud-stat" title="Speed">&#9889; <b id="hud-speed">1</b></span>
-      </div>
-      <div class="hud-group center">
+      <div id="hud-center">
         <span class="hud-stat" title="Level"><span id="hud-level-label">LEVEL</span> <b id="hud-level">1</b></span>
         <span class="hud-stat timer" title="Time left">&#9201; <b id="hud-time">200</b></span>
-        <span class="hud-stat" title="Score">SCORE <b id="hud-score">0</b></span>
-        <span class="hud-stat" id="hud-mute" title="Sound on (M)">&#128266;</span>
+        <button type="button" class="hud-btn" id="hud-mute" title="Sound (M)">&#128266;</button>
+        <button type="button" class="hud-btn" id="hud-touch" title="Toggle touch controls">&#127918;</button>
       </div>
-      <div class="hud-group" id="hud-p2">
-        <span class="hud-label p2">P2</span>
-        <span class="hud-stat" title="Lives">&#10084; <b id="hud-lives2">3</b></span>
-        <span class="hud-stat" title="Bombs">&#128163; <b id="hud-bombs2">1</b></span>
-        <span class="hud-stat" title="Flame range">&#128293; <b id="hud-range2">1</b></span>
-        <span class="hud-stat" title="Speed">&#9889; <b id="hud-speed2">1</b></span>
-      </div>
+      <div id="hud-players"></div>
     </header>
 
     <main id="stage">
@@ -42,24 +37,44 @@
       </div>
     </main>
 
+    <div id="touch">
+      <div id="dpad" aria-label="Move">
+        <span class="dpad-arrow up">&#9650;</span>
+        <span class="dpad-arrow right">&#9654;</span>
+        <span class="dpad-arrow down">&#9660;</span>
+        <span class="dpad-arrow left">&#9664;</span>
+        <span class="dpad-center"></span>
+      </div>
+      <div id="touch-actions">
+        <div class="touch-row">
+          <button type="button" class="tbtn small" data-code="KeyP" aria-label="Pause">&#10074;&#10074;</button>
+          <button type="button" class="tbtn small hidden" id="touch-detonate" data-code="KeyE" aria-label="Detonate">&#128225;</button>
+        </div>
+        <button type="button" class="tbtn bomb" data-code="Space" aria-label="Bomb">&#128163;</button>
+      </div>
+    </div>
+
     <footer id="controls">
       <div class="control-block">
-        <b>Player 1</b> &mdash; Move: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or Arrows &nbsp; Bomb: <kbd>Space</kbd>
+        <b>Player 1</b> &mdash; Move: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or Arrows &nbsp; Bomb: <kbd>Space</kbd> &nbsp; Detonate: <kbd>E</kbd>
       </div>
       <div class="control-block">
-        <b>Player 2</b> &mdash; Move: <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> &nbsp; Bomb: <kbd>Enter</kbd>
+        <b>Player 2</b> &mdash; Move: <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> &nbsp; Bomb: <kbd>Enter</kbd> &nbsp; Detonate: <kbd>O</kbd>
       </div>
       <div class="control-block">
-        <kbd>P</kbd> Pause &nbsp; <kbd>M</kbd> Mute &nbsp; <kbd>R</kbd> Restart
+        <kbd>P</kbd> Pause &nbsp; <kbd>M</kbd> Mute &nbsp; <kbd>R</kbd> Menu
       </div>
     </footer>
   </div>
 
   <script src="js/constants.js"></script>
+  <script src="js/storage.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/input.js"></script>
+  <script src="js/touch.js"></script>
   <script src="js/level.js"></script>
   <script src="js/entities.js"></script>
+  <script src="js/bot.js"></script>
   <script src="js/render.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>

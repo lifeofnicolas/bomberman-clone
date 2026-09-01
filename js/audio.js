@@ -101,4 +101,25 @@ class Sfx {
   tick() {
     this.tone(1200, 0.04, { type: 'square', volume: 0.05 });
   }
+
+  alarm() {
+    for (let i = 0; i < 3; i++) {
+      this.tone(880, 0.12, { type: 'square', volume: 0.09, delay: i * 0.25 });
+      this.tone(660, 0.12, { type: 'square', volume: 0.09, delay: i * 0.25 + 0.12 });
+    }
+  }
+
+  kick() {
+    this.tone(300, 0.07, { type: 'triangle', volume: 0.1, slideTo: 500 });
+  }
+
+  thud() {
+    this.noise(0.12, 0.18);
+    this.tone(70, 0.15, { type: 'sine', volume: 0.15, slideTo: 40 });
+  }
+
+  curse() {
+    this.tone(200, 0.35, { type: 'sawtooth', volume: 0.08, slideTo: 90 });
+    this.tone(150, 0.35, { type: 'square', volume: 0.05, slideTo: 60, delay: 0.1 });
+  }
 }

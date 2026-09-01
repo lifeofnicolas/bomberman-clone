@@ -38,6 +38,18 @@ class Input {
     return this.pressed.has(codes);
   }
 
+  // Programmatic key press/release (used by touch controls).
+  press(code) {
+    if (this.down.has(code)) return;
+    this.down.add(code);
+    this.pressed.add(code);
+    if (this.onAny) this.onAny();
+  }
+
+  release(code) {
+    this.down.delete(code);
+  }
+
   endFrame() {
     this.pressed.clear();
   }

@@ -4,10 +4,9 @@
   --panel-border: #2d3245;
   --text: #e8e9f0;
   --muted: #8b90a5;
-  --p1: #4fc3f7;
-  --p2: #ff8a65;
   --accent: #ffb300;
   --danger: #ef5350;
+  --board-w: 720px;
 }
 
 * {
@@ -18,70 +17,75 @@ html,
 body {
   margin: 0;
   padding: 0;
+  height: 100%;
+  min-height: 100dvh;
   background: radial-gradient(circle at 50% 20%, #1b1f2e 0%, var(--bg) 70%);
   color: var(--text);
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overscroll-behavior: none;
 }
 
 #app {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 16px;
+  display: grid;
+  grid-template-areas: "hud" "stage" "touch" "controls";
+  grid-template-rows: auto auto auto auto;
+  justify-items: center;
+  align-content: start;
+  gap: 8px;
+  min-height: 100dvh;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
 }
 
+/* ---------------------------------------------------------------- HUD */
 #hud {
-  width: 720px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
+  grid-area: hud;
+  width: min(var(--board-w), 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 14px;
+  padding: 6px 10px;
+  font-size: clamp(11px, 2.8vw, 14px);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
 }
 
+#hud-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+
+#hud-players {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+#hud-players:empty {
+  display: none;
+}
+
+#hud-players.many .hud-group {
+  font-size: 0.92em;
+}
+
 .hud-group {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-}
-
-.hud-group.center {
-  justify-content: center;
-  gap: 12px;
-  padding: 0 16px;
-}
-
-#hud-p2 {
-  justify-content: flex-end;
-}
-
-#hud-p2.hidden {
-  visibility: hidden;
 }
 
 .hud-label {
   font-weight: 800;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 6px;
   color: #111;
-}
-
-.hud-label.p1 {
-  background: var(--p1);
-}
-
-.hud-label.p2 {
-  background: var(--p2);
 }
 
 .hud-stat b {
@@ -89,9 +93,34 @@ body {
   color: #fff;
 }
 
+.hud-stat.score {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+.hud-extras {
+  letter-spacing: 0.1em;
+}
+
 .hud-stat.timer.warning b {
   color: var(--danger);
   animation: blink 0.6s steps(2) infinite;
+}
+
+.hud-btn {
+  font: inherit;
+  font-size: 1.1em;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.hud-btn.active {
+  border-color: var(--accent);
 }
 
 @keyframes blink {
@@ -100,22 +129,31 @@ body {
   }
 }
 
+/* -------------------------------------------------------------- stage */
 #stage {
+  grid-area: stage;
   position: relative;
-  width: 720px;
-  height: 624px;
+  width: min(var(--board-w), 100%, calc((100dvh - 140px) * 720 / 624));
+  aspect-ratio: 720 / 624;
   border: 4px solid #2d3245;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   background: #000;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-canvas {
+canvas#game {
   display: block;
-  image-rendering: pixelated;
+  width: 100%;
+  height: 100%;
 }
 
+/* ------------------------------------------------------------ overlay */
 #overlay {
   position: absolute;
   inset: 0;
@@ -124,9 +162,9 @@ canvas {
   align-items: center;
   justify-content: center;
   text-align: center;
-  background: rgba(10, 12, 20, 0.82);
-  backdrop-filter: blur(3px);
-  padding: 24px;
+  background: rgba(10, 12, 20, 0.86);
+  padding: 4%;
+  overflow-y: auto;
 }
 
 #overlay.visible {
@@ -135,15 +173,15 @@ canvas {
 
 #overlay h1 {
   margin: 0 0 8px;
-  font-size: 56px;
-  letter-spacing: 0.12em;
+  font-size: clamp(26px, 7.5cqw, 52px);
+  letter-spacing: 0.1em;
   color: var(--accent);
   text-shadow: 0 4px 0 #a06a00, 0 8px 24px rgba(255, 179, 0, 0.35);
 }
 
 #overlay p {
-  margin: 0 0 20px;
-  font-size: 18px;
+  margin: 0 0 16px;
+  font-size: clamp(12px, 2.4cqw, 17px);
   color: var(--text);
   white-space: pre-line;
   line-height: 1.5;
@@ -151,41 +189,56 @@ canvas {
 
 #overlay-buttons {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
   justify-content: center;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 #overlay button {
   font: inherit;
-  font-size: 16px;
+  font-size: clamp(13px, 2.3cqw, 16px);
   font-weight: 700;
   letter-spacing: 0.05em;
-  padding: 12px 22px;
+  min-height: 44px;
+  padding: 10px 20px;
   border-radius: 8px;
   border: 2px solid var(--accent);
   background: #2a2410;
   color: var(--accent);
   cursor: pointer;
   transition: transform 0.08s, background 0.15s;
+  touch-action: manipulation;
 }
 
-#overlay button:hover {
-  background: var(--accent);
-  color: #1a1400;
-  transform: translateY(-2px);
+#overlay button.focused {
+  background: #4a3d12;
+  box-shadow: 0 0 0 2px rgba(255, 179, 0, 0.45);
+}
+
+@media (hover: hover) {
+  #overlay button:hover {
+    background: var(--accent);
+    color: #1a1400;
+    transform: translateY(-2px);
+  }
 }
 
 #overlay-help {
   color: var(--muted);
-  font-size: 13px;
+  font-size: clamp(11px, 1.9cqw, 13px);
   white-space: pre-line;
   line-height: 1.6;
 }
 
+#stage {
+  container-type: inline-size;
+}
+
+/* ----------------------------------------------------------- controls */
 #controls {
-  width: 720px;
+  grid-area: controls;
+  width: min(var(--board-w), 100%);
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -207,4 +260,175 @@ kbd {
   font-family: inherit;
   font-size: 12px;
   text-align: center;
+}
+
+/* -------------------------------------------------------------- touch */
+#touch {
+  grid-area: touch;
+  display: none;
+  width: min(var(--board-w), 100%);
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 4px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.touch-ui #touch {
+  display: flex;
+}
+
+body.touch-ui #controls {
+  display: none;
+}
+
+#dpad {
+  position: relative;
+  width: min(42vw, 190px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2d3245 0%, #1c1f2b 70%);
+  border: 2px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.dpad-arrow {
+  position: absolute;
+  color: #6f7590;
+  font-size: 22px;
+  line-height: 1;
+  transition: color 0.05s;
+}
+
+.dpad-arrow.up {
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.dpad-arrow.down {
+  bottom: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.dpad-arrow.left {
+  left: 10%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.dpad-arrow.right {
+  right: 10%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.dpad-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22%;
+  height: 22%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #141722;
+  border: 2px solid var(--panel-border);
+}
+
+#dpad[data-dir~="ArrowUp"] .dpad-arrow.up,
+#dpad[data-dir~="ArrowDown"] .dpad-arrow.down,
+#dpad[data-dir~="ArrowLeft"] .dpad-arrow.left,
+#dpad[data-dir~="ArrowRight"] .dpad-arrow.right {
+  color: var(--accent);
+}
+
+#touch-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.touch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tbtn {
+  font: inherit;
+  border-radius: 50%;
+  border: 2px solid var(--panel-border);
+  background: radial-gradient(circle, #2d3245 0%, #1c1f2b 80%);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  touch-action: none;
+}
+
+.tbtn.bomb {
+  width: min(24vw, 96px);
+  height: min(24vw, 96px);
+  font-size: 34px;
+  border-color: var(--accent);
+}
+
+.tbtn.small {
+  width: 46px;
+  height: 46px;
+  font-size: 16px;
+}
+
+.tbtn.held {
+  filter: brightness(1.5);
+  transform: scale(0.96);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Landscape touch devices: D-pad left, board centre, actions right. */
+@media (orientation: landscape) and (max-height: 600px) {
+  body.touch-ui #app {
+    grid-template-areas: "hud hud hud" "dpad stage actions";
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-rows: auto 1fr;
+    align-items: center;
+  }
+
+  body.touch-ui #stage {
+    width: min(var(--board-w), calc((100dvh - 70px) * 720 / 624), 58vw);
+  }
+
+  body.touch-ui #touch {
+    display: contents;
+  }
+
+  body.touch-ui #dpad {
+    grid-area: dpad;
+    justify-self: center;
+    width: min(34vh, 170px);
+  }
+
+  body.touch-ui #touch-actions {
+    grid-area: actions;
+    justify-self: center;
+    flex-direction: column-reverse;
+  }
+
+  body.touch-ui .touch-row {
+    flex-direction: row;
+  }
+
+  body.touch-ui #hud {
+    padding: 4px 8px;
+  }
 }
