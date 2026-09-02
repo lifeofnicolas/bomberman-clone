@@ -14,7 +14,7 @@ const Save = {
       shake: true,
       difficulty: 'normal',
       progress: { easy: 1, normal: 1, hard: 1 }, // worlds unlocked per difficulty
-      battle: { humans: 1, bots: 1, skill: 'normal' },
+      battle: { humans: 1, bots: 1, skill: 'normal', map: 'small' },
       touchUI: null, // null = auto-detect, true/false = forced
       highScores: { easy: 0, normal: 0, hard: 0 },
       bestLevel: { easy: 0, normal: 0, hard: 0 },
@@ -61,6 +61,7 @@ const Save = {
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     if (!DIFFICULTY[s.difficulty]) s.difficulty = 'normal';
     if (!BOT_TIERS[s.battle.skill]) s.battle.skill = 'normal';
+    if (!MAP_SIZES[s.battle.map]) s.battle.map = 'small';
     s.battle.humans = clamp(Math.round(s.battle.humans), 1, 2);
     s.battle.bots = clamp(Math.round(s.battle.bots), 0, 3);
     s.musicVolume = clamp(s.musicVolume, 0, 1);

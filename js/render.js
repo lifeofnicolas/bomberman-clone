@@ -706,6 +706,21 @@ const Renderer = (() => {
 
     ctx.restore();
 
+    // Curse countdown
+    if (p.curse && !p.dying) {
+      ctx.save();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.fillStyle = '#e1bee7';
+      const label = `\u2620 ${Math.ceil(p.curse.timer / 1000)}`;
+      const ty = game.mode === 2 ? cy - 48 : cy - 36;
+      ctx.strokeText(label, cx, ty);
+      ctx.fillText(label, cx, ty);
+      ctx.restore();
+    }
+
     // Name tag in battle mode
     if (game.mode === 2 && !p.dying) {
       ctx.save();
@@ -832,5 +847,5 @@ const Renderer = (() => {
   }
 
   rebuild();
-  return { draw, setTheme, setScale };
+  return { draw, setTheme, setScale, forceRebuild: rebuild };
 })();

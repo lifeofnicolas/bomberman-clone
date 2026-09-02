@@ -26,7 +26,9 @@ keeps working offline and can be added to a phone's home screen.
 Blast bricks, defeat every enemy, then step on the exit hidden under a brick.
 Five themed worlds of five stages each (Green Fields, Frozen Depths, Desert
 Ruins, Iron Works, Magma Core), each with hand-designed layouts and its own
-music. Every fifth stage is a boss fight: a large enemy with a health bar that
+music. Arenas grow as you progress: worlds 1 and 2 use the classic 15x13
+grid, worlds 3 and 4 are 19x15, and world 5 is 23x17. Timers and enemy counts
+scale with the arena. Every fifth stage is a boss fight: a large enemy with a health bar that
 takes several hits, shrugs off damage for a moment after each one, and calls
 in minions. Beating a boss unlocks the next world, and unlocked worlds can be
 started directly from the world select. After the last world the campaign
@@ -49,10 +51,10 @@ an instant game over. High scores and best levels are saved per difficulty.
 ### Battle
 
 Local versus for 2 to 4 players: 1 or 2 humans on one keyboard plus 0 to 3
-bots. Last one standing wins the round, first to 3 rounds wins the match.
-Everyone starts with 2 bombs and fire 2. A few monsters roam the arena. When
-45 seconds remain, sudden death starts and indestructible blocks spiral inward
-from the edges.
+bots, on a small, medium or large map. Last one standing wins the round, first
+to 3 rounds wins the match. Everyone starts with 2 bombs and fire 2. A few
+monsters roam the arena. When 45 seconds remain, sudden death starts and
+indestructible blocks spiral inward from the edges.
 
 Bots come in three skill levels. They build a danger map of every bomb
 (including chain reactions), search for safe tiles, hunt power-ups, dig toward
@@ -61,6 +63,11 @@ slowly and make mistakes; hard bots do not.
 
 ## Controls
 
+Movement is grid-locked, as in the original: your character travels from tile
+centre to tile centre and always stays centred in its lane. Turns are buffered
+until the next tile centre and reversing direction is immediate. Only one
+player can occupy a tile at a time.
+
 | Action | Player 1 | Player 2 |
 | ------ | ----------------------- | -------- |
 | Move | `W A S D` or Arrow keys | `I J K L` |
@@ -68,7 +75,8 @@ slowly and make mistakes; hard bots do not.
 | Detonate (remote) | `E` or bomb key again | `O` or bomb key again |
 
 Global: `P` / `Esc` pause, `M` mute, `R` back to the menu. Menus can be driven
-with the number keys, arrows, `Enter` and `Esc`.
+with the number keys, arrows, `Enter` and `Esc`. The full list is under
+Options > Controls, also reachable from the pause menu.
 
 Gamepads: the first pad controls Player 1 and the second Player 2. D-pad or
 left stick moves, `A` drops a bomb, `B` detonates remote bombs, `Start`
@@ -80,8 +88,9 @@ phones get the D-pad and buttons on either side of the board.
 
 ## Options
 
-The Options menu sets music and sound volume, screen shake, and whether the
-touch controls are shown (auto, on, off), and can reset saved progress.
+The Options menu (from the title or the pause menu) sets music and sound
+volume, screen shake, and whether the touch controls are shown (auto, on,
+off), shows the controls, and can reset saved progress.
 Settings, high scores, best stages, unlocked worlds and battle wins are stored
 in the browser's localStorage. The title screen runs an attract-mode battle
 between four bots.
@@ -100,7 +109,8 @@ power-ups, so grab them quickly.
 - ❤ **Extra Life** – campaign only
 - 💀 **Skull** – a random 15-second curse: reversed controls, uncontrollable
   bombing (with normal fuses, even if you hold the remote), no bombs, or slow
-  motion. In battle, touching another player passes the curse on.
+  motion. A countdown shows above the player and in the HUD. In battle,
+  touching another player passes the curse on.
 
 ## Enemies
 

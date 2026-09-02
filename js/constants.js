@@ -3,11 +3,30 @@
 // scripts, so these are visible everywhere once this file has loaded.
 // ---------------------------------------------------------------------------
 
-const COLS = 15;
-const ROWS = 13;
 const TILE = 48;
-const CANVAS_W = COLS * TILE; // 720
-const CANVAS_H = ROWS * TILE; // 624
+// Arena size is mutable: bigger maps in later worlds and as a battle option.
+let COLS = 15;
+let ROWS = 13;
+let CANVAS_W = COLS * TILE;
+let CANVAS_H = ROWS * TILE;
+const BASE_COLS = 15;
+const BASE_ROWS = 13;
+
+function setArenaSize(cols, rows) {
+  COLS = cols;
+  ROWS = rows;
+  CANVAS_W = cols * TILE;
+  CANVAS_H = rows * TILE;
+}
+
+const MAP_SIZES = {
+  small: { label: 'Small', cols: 15, rows: 13 },
+  medium: { label: 'Medium', cols: 19, rows: 15 },
+  large: { label: 'Large', cols: 23, rows: 17 },
+};
+const MAP_SIZE_ORDER = ['small', 'medium', 'large'];
+// Arena size per campaign world (index = world number - 1, wraps on loop).
+const WORLD_SIZES = ['small', 'small', 'medium', 'medium', 'large'];
 
 const TILE_EMPTY = 0;
 const TILE_WALL = 1;

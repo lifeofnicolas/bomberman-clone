@@ -309,6 +309,7 @@ class Bot {
         const k = tileKey(x, y);
         if (seen.has(k)) continue;
         if (game.grid[y][x] !== TILE_EMPTY || game.bombAt(x, y)) continue;
+        if (game.players.some((o) => o !== p && o.alive && o.tx === x && o.ty === y)) continue;
         const t = n.t + tileTime; // arrival at the tile centre
         const enter = t - tileTime / 2; // the game counts us inside once our centre crosses the edge
         const e = d[y][x];

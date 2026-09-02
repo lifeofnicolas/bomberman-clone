@@ -122,10 +122,50 @@ function protectedTiles(spawns) {
   return set;
 }
 
+// Classic layout at any size: border, pillars on even/even tiles, corner
+// spawns, and optionally an open plaza in the middle for boss fights.
+function proceduralTemplate(cols, rows, opts = {}) {
+  const lines = [];
+  const cx = Math.floor(cols / 2);
+  const cy = Math.floor(rows / 2);
+  for (let y = 0; y < rows; y++) {
+    let line = '';
+    for (let x = 0; x < cols; x++) {
+      const border = x === 0 || y === 0 || x === cols - 1 || y === rows - 1;
+      const pillar = x % 2 === 0 && y % 2 === 0;
+      const corner = (x === 1 || x === cols - 2) && (y === 1 || y === rows - 2);
+      const plaza = opts.plaza && Math.abs(x - cx) <= 2 && Math.abs(y - cy) <= 2;
+      if (border || (pillar && !plaza)) line += '#';
+      else if (corner) line += 'S';
+      else if (plaza) line += '.';
+      else line += '?';
+    }
+    lines.push(line);
+  }
+  // A few random wall blocks to break up the regular pillar pattern.
+  if (opts.blocks) {
+    const grid = lines.map((l) => l.split(''));
+    for (let i = 0; i < opts.blocks; i++) {
+      const bx = 3 + Math.floor(Math.random() * (cols - 6));
+      const by = 3 + Math.floor(Math.random() * (rows - 6));
+      if (grid[by][bx] === '?' && Math.abs(bx - cx) + Math.abs(by - cy) > 3) {
+        grid[by][bx] = '#';
+        grid[rows - 1 - by][cols - 1 - bx] = '#'; // keep it point-symmetric
+      }
+    }
+    return grid.map((l) => l.join(''));
+  }
+  return lines;
+}
+
 // Build a grid from a template. Returns { grid, spawns }.
 // opts.symmetric mirrors the brick roll so both halves get identical bricks.
+// Templates are 15x13; any other arena size uses the procedural layout.
 function buildLevel(templateName, density, opts = {}) {
-  const tpl = TEMPLATES[templateName] || TEMPLATES.classic;
+  let tpl = TEMPLATES[templateName] || TEMPLATES.classic;
+  if (COLS !== BASE_COLS || ROWS !== BASE_ROWS || templateName === 'procedural') {
+    tpl = proceduralTemplate(COLS, ROWS, { plaza: !!opts.plaza, blocks: opts.blocks || 0 });
+  }
   const grid = [];
   const spawns = [];
   const eligible = [];

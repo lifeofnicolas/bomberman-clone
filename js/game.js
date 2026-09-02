@@ -54,9 +54,24 @@ class Game {
     this.timedOut = false;
     this.danger = new Uint8Array(COLS * ROWS);
 
+    this.onArenaResize = null;
+    this.setArena(BASE_COLS, BASE_ROWS);
     this.grid = buildLevel('classic', 0.55).grid;
     Renderer.setTheme(this.theme);
     this.showTitle();
+  }
+
+  setArena(cols, rows) {
+    if (cols !== COLS || rows !== ROWS || this.danger.length !== cols * rows) {
+      setArenaSize(cols, rows);
+      this.danger = new Uint8Array(COLS * ROWS);
+    }
+    if (this.onArenaResize) this.onArenaResize();
+  }
+
+  // Scale factor for timers and enemy counts relative to the classic 15x13 arena.
+  areaScale() {
+    return (COLS * ROWS) / (BASE_COLS * BASE_ROWS);
   }
 
   saveSettings() {
@@ -188,21 +203,37 @@ class Game {
             rerender();
           },
         },
+        {
+          cycle: true,
+          label: `MAP: ${MAP_SIZES[b.map || 'small'].label.toUpperCase()}`,
+          action: () => {
+            const i = MAP_SIZE_ORDER.indexOf(b.map || 'small');
+            b.map = MAP_SIZE_ORDER[(i + 1) % MAP_SIZE_ORDER.length];
+            rerender();
+          },
+        },
         { label: 'BACK', action: () => this.showTitle(), back: true },
       ],
-      help: this.keyHint('Press 1-5 to choose · Enter to start · Esc to go back\nPlayer 2 uses I J K L and Enter, or a second gamepad'),
+      help: this.keyHint('Press 1-6 to choose · Enter to start · Esc to go back\nPlayer 2 uses I J K L and Enter, or a second gamepad'),
     });
   }
 
-  showOptions() {
-    this.state = 'setup';
+  showOptions(returnTo = 'title') {
+    // Reachable from the title and from the pause menu; state stays a menu
+    // state either way so the game underneath does not advance.
+    this.state = returnTo === 'pause' ? 'paused' : 'setup';
     const s = this.settings;
     const pct = (v) => `${Math.round(v * 100)}%`;
     const cycleVolume = (v) => (v >= 1 ? 0 : Math.min(1, v + 0.25));
+    const goBack = () => {
+      this.resetArmed = false;
+      if (returnTo === 'pause') this.showPauseMenu();
+      else this.showTitle();
+    };
     const rerender = () => {
       const focus = this.ui.focusIndex;
       this.saveSettings();
-      this.showOptions();
+      this.showOptions(returnTo);
       this.ui.focusButton(focus);
     };
     const touchLabel = s.touchUI === null || s.touchUI === undefined ? 'AUTO' : s.touchUI ? 'ON' : 'OFF';
@@ -246,6 +277,7 @@ class Game {
             rerender();
           },
         },
+        { label: 'CONTROLS', action: () => this.showControls(returnTo) },
         {
           label: this.resetArmed ? 'CONFIRM RESET?' : 'RESET PROGRESS',
           action: () => {
@@ -261,16 +293,25 @@ class Game {
             rerender();
           },
         },
-        {
-          label: 'BACK',
-          action: () => {
-            this.resetArmed = false;
-            this.showTitle();
-          },
-          back: true,
-        },
+        { label: 'BACK', action: goBack, back: true },
       ],
-      help: this.keyHint('Press 1-6 to choose · Esc to go back · M mutes everything'),
+      help: this.keyHint('Press 1-7 to choose · Esc to go back · M mutes everything'),
+    });
+  }
+
+  showControls(returnTo = 'title') {
+    this.state = returnTo === 'pause' ? 'paused' : 'setup';
+    this.ui.showOverlay({
+      title: 'CONTROLS',
+      text:
+        'Player 1:  W A S D or arrow keys move  ·  Space drops a bomb  ·  E detonates remote bombs\n' +
+        'Player 2:  I J K L move  ·  Enter drops a bomb  ·  O detonates remote bombs\n' +
+        'Gamepads:  D-pad or stick moves  ·  A bomb  ·  B detonate  ·  Start pause\n\n' +
+        'P or Esc pauses  ·  M mutes music and sound  ·  R returns to the menu\n' +
+        'Menus: number keys pick a button, arrows move, Enter confirms, Esc goes back\n' +
+        (this.ui.isTouch() ? '\nTouch: D-pad moves, the big button drops a bomb, the small buttons pause and detonate.' : ''),
+      buttons: [{ label: 'BACK', action: () => this.showOptions(returnTo), back: true }],
+      help: this.keyHint('Esc or Enter to go back'),
     });
   }
 
@@ -377,14 +418,20 @@ class Game {
     const battle = this.mode === 2;
     let templateName;
     let density;
+    let boss = false;
 
     if (battle) {
+      const size = MAP_SIZES[this.demo ? 'small' : this.settings.battle.map || 'small'] || MAP_SIZES.small;
+      this.setArena(size.cols, size.rows);
       this.theme = WORLD_ORDER[(this.level - 1) % WORLD_ORDER.length];
       templateName = randomItem(TEMPLATE_NAMES);
       density = 0.6;
       this.levelLabel = `ROUND ${this.level}`;
     } else {
       const s = this.campaignStage();
+      const size = MAP_SIZES[WORLD_SIZES[s.world % WORLD_SIZES.length]] || MAP_SIZES.small;
+      this.setArena(size.cols, size.rows);
+      boss = s.boss;
       this.theme = s.theme;
       templateName = s.boss ? 'arena' : WORLD_TEMPLATES[s.theme][s.stage];
       density = s.boss
@@ -395,7 +442,11 @@ class Game {
     }
     Renderer.setTheme(this.theme);
 
-    const built = buildLevel(templateName, density, { symmetric: battle });
+    const built = buildLevel(templateName, density, {
+      symmetric: battle,
+      plaza: boss,
+      blocks: this.areaScale() > 1 ? Math.round(3 * this.areaScale()) : 0,
+    });
     this.grid = built.grid;
     const spawns = [];
     this.players.forEach((p, i) => {
@@ -452,7 +503,10 @@ class Game {
       if (spot) this.exit = { tx: spot.x, ty: spot.y, revealed: false };
     }
 
-    this.timeLeft = battle ? BATTLE_TIME : this.diff.levelTime;
+    // Bigger arenas get proportionally more time.
+    const timeScale = Math.sqrt(this.areaScale());
+    this.timeLeft = Math.round((battle ? BATTLE_TIME : this.diff.levelTime) * timeScale);
+    this.levelTime = this.timeLeft;
     this.lastTickSecond = -1;
   }
 
@@ -492,7 +546,8 @@ class Game {
   campaignRoster() {
     const loop = Math.floor((this.level - 1) / (LEVELS_PER_WORLD * WORLD_ORDER.length));
     const boss = this.isBossLevel();
-    const count = boss ? 2 : Math.min(14, this.diff.enemyCount(this.level) + loop * 2);
+    const scaled = Math.round(this.diff.enemyCount(this.level) * Math.pow(this.areaScale(), 0.6));
+    const count = boss ? 2 : Math.min(20, scaled + loop * 2);
     const entry = this.pacingPool();
     // Boss stages keep the fast wall-passing Pontans out so the boss is the threat.
     const pool = boss ? entry.pool.filter((t) => t !== 'pontan') : entry.pool;
@@ -514,6 +569,7 @@ class Game {
     const list = ['balloom', 'balloom'];
     if (this.level >= 3) list.push('oneal');
     if (this.level >= 5) list.push('doll');
+    for (let i = 1; i < Math.round(this.areaScale()); i++) list.push('balloom');
     return list;
   }
 
@@ -523,13 +579,18 @@ class Game {
   pause() {
     if (this.state !== 'playing' && this.state !== 'intro') return;
     this.pausedFrom = this.state;
-    this.state = 'paused';
     this.music.setDuck(0.3);
+    this.showPauseMenu();
+  }
+
+  showPauseMenu() {
+    this.state = 'paused';
     this.ui.showOverlay({
       title: 'PAUSED',
       text: '',
       buttons: [
         { label: 'RESUME', action: () => this.resume() },
+        { label: 'OPTIONS', action: () => this.showOptions('pause') },
         { label: 'MAIN MENU', action: () => this.showTitle(), back: true },
       ],
       help: this.keyHint('Press P to resume'),
@@ -562,7 +623,7 @@ class Game {
     this.music.stop();
     const p = this.players[0];
     const mult = this.diff.scoreMult;
-    const timeFrac = this.timeLeft / this.diff.levelTime;
+    const timeFrac = this.timeLeft / (this.levelTime || this.diff.levelTime);
     const stars = timeFrac >= 0.5 ? 3 : timeFrac >= 0.25 ? 2 : 1;
     const items = [
       { label: this.boss ? 'Boss defeated' : 'Stage clear', value: Math.round((this.boss ? 1500 : 500) * mult) },
@@ -862,9 +923,10 @@ class Game {
       this.announce('SUDDEN DEATH!', '#ef5350');
       this.sfx.alarm();
     }
+    const interval = Math.min(SUDDEN_DEATH_INTERVAL, ((SUDDEN_DEATH_AT - 3) * 1000) / Math.max(1, this.spiral.length));
     this.spiralTimer += dt * 1000;
-    while (this.spiralTimer >= SUDDEN_DEATH_INTERVAL && this.spiralIndex < this.spiral.length - 2) {
-      this.spiralTimer -= SUDDEN_DEATH_INTERVAL;
+    while (this.spiralTimer >= interval && this.spiralIndex < this.spiral.length - 2) {
+      this.spiralTimer -= interval;
       this.dropBlock(this.spiral[this.spiralIndex++]);
     }
   }
@@ -1086,10 +1148,12 @@ class Game {
         }
         return false;
       case 'paused': {
-        if (inp.wasPressed(['KeyP', 'Escape'])) {
+        const onPauseMenu = this.ui.overlayTitle.textContent === 'PAUSED';
+        if (inp.wasPressed('KeyP') || (onPauseMenu && inp.wasPressed('Escape'))) {
           this.resume();
           return true;
         }
+        if (!onPauseMenu && inp.wasPressed(['Escape', 'Backspace'])) return this.ui.backAction();
         const d = pressedDigit();
         if (d >= 0) return this.ui.activateButton(d);
         if (inp.wasPressed(['Enter', 'NumpadEnter', 'Space'])) return this.ui.activateFocused();
@@ -1192,6 +1256,12 @@ class Game {
     if (t === TILE_BRICK) return !(entity.wallPass || (entity.cfg && entity.cfg.passBricks));
     const b = this.bombAt(tx, ty);
     if (b && !b.walkers.has(entity)) return !(entity.cfg && entity.cfg.passBombs);
+    // One player per tile: another player's current or claimed tile is blocked.
+    if (entity instanceof Player) {
+      for (const o of this.players) {
+        if (o !== entity && o.alive && o.occupies(tx, ty)) return true;
+      }
+    }
     return false;
   }
 

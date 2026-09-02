@@ -58,6 +58,9 @@ class Player {
     this.moving = false;
     this.animTime = 0;
     this.lastAxis = 'y';
+    this.moveTarget = null;
+    this.originTile = null;
+    this.moveDir = 'down';
     this.curse = null;
     this.curseImmune = 0;
     if (this.bot) this.bot.reset();
@@ -103,29 +106,19 @@ class Player {
       dx = -dx;
       dy = -dy;
     }
-    const both = dx !== 0 && dy !== 0;
-    this.moving = dx !== 0 || dy !== 0;
-
-    if (this.moving) {
-      const dist = this.speed * dt;
-      const primary = both ? this.lastAxis : dx !== 0 ? 'x' : 'y';
-      if (primary === 'x') {
-        this.facing = dx > 0 ? 'right' : 'left';
-        const moved = this.moveAxis(game, dx * dist, 0, !both);
-        if (moved < EPS && both) {
-          this.facing = dy > 0 ? 'down' : 'up';
-          this.moveAxis(game, 0, dy * dist, false);
-        }
-      } else {
-        this.facing = dy > 0 ? 'down' : 'up';
-        const moved = this.moveAxis(game, 0, dy * dist, !both);
-        if (moved < EPS && both) {
-          this.facing = dx > 0 ? 'right' : 'left';
-          this.moveAxis(game, dx * dist, 0, false);
-        }
-      }
-      this.animTime += dt;
+    // Wanted directions, most recently pressed axis first.
+    const dirs = [];
+    const h = dx > 0 ? 'right' : dx < 0 ? 'left' : null;
+    const v = dy > 0 ? 'down' : dy < 0 ? 'up' : null;
+    if (this.lastAxis === 'x') {
+      if (h) dirs.push(h);
+      if (v) dirs.push(v);
+    } else {
+      if (v) dirs.push(v);
+      if (h) dirs.push(h);
     }
+
+    this.moveGrid(game, dirs, this.speed * dt);
 
     if (this.hasCurse('diarrhea')) {
       game.tryPlaceBomb(this);
@@ -138,75 +131,77 @@ class Player {
     }
   }
 
-  // Move along one axis with grid collision. Returns the distance moved.
-  // With `assist`, a blocked player is gently nudged toward the lane centre
-  // when the tile ahead in that lane is free ("corner assist").
-  moveAxis(game, mx, my, assist) {
-    const h = this.half;
-
-    if (mx !== 0) {
-      const dir = Math.sign(mx);
-      let nx = this.x + mx;
-      const tx = tileOf(nx + dir * h);
-      const ty0 = tileOf(this.y - h + EPS);
-      const ty1 = tileOf(this.y + h - EPS);
-      let blocked = false;
-      for (let ty = ty0; ty <= ty1; ty++) {
-        if (game.isSolidFor(tx, ty, this)) {
-          blocked = true;
-          break;
+  // Grid-locked movement: travel from tile centre to tile centre, always
+  // centred in the lane. Turns are buffered until the next centre; reversing
+  // along the current axis is immediate.
+  moveGrid(game, dirs, dist) {
+    let remaining = dist;
+    this.moving = false;
+    let guard = 0;
+    while (remaining > 0 && guard++ < 4) {
+      if (!this.moveTarget) {
+        const dir = this.pickDir(game, dirs);
+        if (!dir) break;
+        this.startMove(dir);
+      } else if (dirs.length && dirs[0] === OPPOSITE[this.moveDir] && this.originTile) {
+        // Turn back toward the tile we came from.
+        const o = this.originTile;
+        const t = this.moveTarget;
+        if (!game.isSolidFor(o.x, o.y, this) || (o.x === this.tx && o.y === this.ty)) {
+          this.moveTarget = { x: o.x, y: o.y };
+          this.originTile = { x: t.x, y: t.y };
+          this.moveDir = dirs[0];
+          this.facing = dirs[0];
         }
       }
-      if (blocked) {
-        nx = dir > 0 ? tx * TILE - h - EPS : (tx + 1) * TILE + h + EPS;
-        const row = this.ty;
-        const cy = centerOf(row);
-        if (this.canKick && Math.abs(this.y - cy) < TILE * 0.3) {
-          const bomb = game.bombAt(tx, row);
-          if (bomb && !bomb.walkers.has(this) && !bomb.slideDir) game.kickBomb(bomb, dir > 0 ? 'right' : 'left');
-        }
-        if (assist && Math.abs(this.y - cy) > 0.5 && !game.isSolidFor(tx, row, this)) {
-          const step = Math.min(Math.abs(mx), Math.abs(cy - this.y));
-          this.y += Math.sign(cy - this.y) * step;
-        }
+      const cx = centerOf(this.moveTarget.x);
+      const cy = centerOf(this.moveTarget.y);
+      const d = Math.abs(cx - this.x) + Math.abs(cy - this.y);
+      this.moving = true;
+      if (d <= remaining) {
+        this.x = cx;
+        this.y = cy;
+        remaining -= d;
+        this.moveTarget = null;
+        this.originTile = null;
+        if (!dirs.length) break;
+      } else {
+        this.x += Math.sign(cx - this.x) * Math.min(remaining, Math.abs(cx - this.x));
+        this.y += Math.sign(cy - this.y) * Math.min(remaining, Math.abs(cy - this.y));
+        remaining = 0;
       }
-      const moved = Math.abs(nx - this.x);
-      this.x = nx;
-      return moved;
     }
+    if (this.moving) this.animTime += dist / this.speed;
+  }
 
-    if (my !== 0) {
-      const dir = Math.sign(my);
-      let ny = this.y + my;
-      const ty = tileOf(ny + dir * h);
-      const tx0 = tileOf(this.x - h + EPS);
-      const tx1 = tileOf(this.x + h - EPS);
-      let blocked = false;
-      for (let tx = tx0; tx <= tx1; tx++) {
-        if (game.isSolidFor(tx, ty, this)) {
-          blocked = true;
-          break;
-        }
+  startMove(dir) {
+    const v = DIRS[dir];
+    this.originTile = { x: this.tx, y: this.ty };
+    this.moveTarget = { x: this.tx + v.dx, y: this.ty + v.dy };
+    this.moveDir = dir;
+    this.facing = dir;
+  }
+
+  // First wanted direction whose tile is free. Walking into a bomb kicks it.
+  pickDir(game, dirs) {
+    for (const dir of dirs) {
+      const v = DIRS[dir];
+      const nx = this.tx + v.dx;
+      const ny = this.ty + v.dy;
+      if (!game.isSolidFor(nx, ny, this)) return dir;
+      this.facing = dir;
+      if (this.canKick) {
+        const bomb = game.bombAt(nx, ny);
+        if (bomb && !bomb.walkers.has(this) && !bomb.slideDir) game.kickBomb(bomb, dir);
       }
-      if (blocked) {
-        ny = dir > 0 ? ty * TILE - h - EPS : (ty + 1) * TILE + h + EPS;
-        const col = this.tx;
-        const cx = centerOf(col);
-        if (this.canKick && Math.abs(this.x - cx) < TILE * 0.3) {
-          const bomb = game.bombAt(col, ty);
-          if (bomb && !bomb.walkers.has(this) && !bomb.slideDir) game.kickBomb(bomb, dir > 0 ? 'down' : 'up');
-        }
-        if (assist && Math.abs(this.x - cx) > 0.5 && !game.isSolidFor(col, ty, this)) {
-          const step = Math.min(Math.abs(my), Math.abs(cx - this.x));
-          this.x += Math.sign(cx - this.x) * step;
-        }
-      }
-      const moved = Math.abs(ny - this.y);
-      this.y = ny;
-      return moved;
     }
+    return null;
+  }
 
-    return 0;
+  // Tile this player occupies or is about to occupy.
+  occupies(tx, ty) {
+    if (this.tx === tx && this.ty === ty) return true;
+    return !!this.moveTarget && this.moveTarget.x === tx && this.moveTarget.y === ty;
   }
 }
 

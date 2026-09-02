@@ -15,19 +15,13 @@ class UI {
     this.level = $('hud-level');
     this.time = $('hud-time');
     this.timerStat = this.time.parentElement;
-    this.mute = $('hud-mute');
-    this.touchToggle = $('hud-touch');
     this.touchDetonate = $('touch-detonate');
     this.buttons = [];
     this.focusIndex = 0;
     this.touch = false;
     this.coarse = false;
     this.playerRefs = [];
-    this.onTouchToggle = null;
     this.onActivate = null;
-    this.touchToggle.addEventListener('click', () => {
-      if (this.onTouchToggle) this.onTouchToggle();
-    });
   }
 
   set(el, value) {
@@ -42,7 +36,6 @@ class UI {
   setTouchUI(on) {
     this.touch = !!on;
     document.body.classList.toggle('touch-ui', this.touch);
-    this.touchToggle.classList.toggle('active', this.touch);
   }
 
   // ---------------- overlay ----------------
@@ -184,7 +177,7 @@ class UI {
       if (p.canKick) extras += '👟';
       if (p.remote) extras += '📡';
       if (p.wallPass) extras += '👻';
-      if (p.curse) extras += '💀';
+      if (p.curse) extras += `💀${Math.ceil(p.curse.timer / 1000)}s`;
       this.set(refs.extras, extras);
       this.set(refs.score, p.score);
     });
@@ -202,8 +195,7 @@ class UI {
   }
 
   setMuted(muted) {
-    this.set(this.mute, muted ? '🔇' : '🔊');
-    this.mute.title = muted ? 'Sound off (M)' : 'Sound on (M)';
+    document.body.classList.toggle('muted', !!muted);
   }
 }
 
@@ -226,15 +218,6 @@ class UI {
   const game = new Game(canvas, input, sfx, music, ui);
   window.game = game; // handy for debugging in the console
 
-  ui.onTouchToggle = () => {
-    const on = !ui.isTouch();
-    ui.setTouchUI(on);
-    game.settings.touchUI = on;
-    game.saveSettings();
-    if (game.state === 'title') game.showTitle();
-  };
-  document.getElementById('hud-mute').addEventListener('click', () => game.toggleMute());
-
   const touch = new TouchControls(input, document.getElementById('touch'));
   touch.onAny = () => sfx.ensure();
 
@@ -250,16 +233,23 @@ class UI {
   document.addEventListener('touchend', () => sfx.ensure(), { passive: true });
 
   // Sharper canvas on high-DPI screens: scale the backing store (max 2x).
+  // Also keeps the CSS layout in sync with the current arena size.
+  const app = document.getElementById('app');
   function fitCanvas() {
+    app.style.setProperty('--cols', COLS);
+    app.style.setProperty('--rows', ROWS);
+    app.style.setProperty('--board-w', `${CANVAS_W}px`);
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const k = Math.min(2, Math.max(1, Math.ceil((dpr * rect.width) / CANVAS_W)));
-    if (canvas.width !== CANVAS_W * k) {
+    if (canvas.width !== CANVAS_W * k || canvas.height !== CANVAS_H * k) {
       canvas.width = CANVAS_W * k;
       canvas.height = CANVAS_H * k;
       Renderer.setScale(k);
+      Renderer.forceRebuild();
     }
   }
+  game.onArenaResize = fitCanvas;
   fitCanvas();
   if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe(stage);
   window.addEventListener('resize', fitCanvas);

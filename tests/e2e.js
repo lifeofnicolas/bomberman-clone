@@ -51,6 +51,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('shake toggles off', await page.evaluate(() => game.settings.shake === false));
   await press(page, 'Digit3');
   await press(page, 'Digit5');
+  check('controls screen', (await title(page)) === 'CONTROLS');
+  await press(page, 'Escape');
+  await press(page, 'Digit6');
   check('reset arms', (await page.evaluate(() => [...document.querySelectorAll('#overlay button')].map((b) => b.textContent).join('|'))).includes('CONFIRM'));
   await press(page, 'Escape');
   check('back to title', (await title(page)) === 'BOMBERMAN' && (await page.evaluate(() => game.resetArmed === false)));
@@ -129,7 +132,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('retry restarts at world 2', await page.evaluate(() => game.level === 6 && game.state === 'intro'));
 
   // Menu -> world select shown now that world 2 unlocked
-  await press(page, 'KeyP'); await press(page, 'Digit2', 150); // pause -> main menu
+  await press(page, 'KeyP'); await press(page, 'Digit3', 150); // pause -> main menu
   check('menu restarts demo', (await state(page)) === 'title' && (await page.evaluate(() => game.demo && game.music.track === 'title')));
   await press(page, 'Digit1'); await press(page, 'Digit2');
   check('world select', (await title(page)) === 'SELECT WORLD' && (await page.evaluate(() => document.querySelectorAll('#overlay button').length === 3)));
@@ -239,6 +242,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }), await page.evaluate(() => JSON.stringify(game.settings)));
   await press(page, 'Digit2');
   check('battle setup renders with sanitized save', (await title(page)) === 'BATTLE');
+
+  // Grid-locked movement and one-player-per-tile
+  await page.evaluate(() => {
+    game.settings.battle = { humans: 2, bots: 0, skill: 'normal', map: 'small' };
+    game.startBattle(); game.state = 'playing'; game.intro = null;
+    const [p1, p2] = game.players; p1.shield = p2.shield = 99999;
+    p1.x = centerOf(1); p1.y = centerOf(1); p2.x = centerOf(2); p2.y = centerOf(1);
+    game.grid[1][2] = TILE_EMPTY; game.grid[1][3] = TILE_EMPTY;
+  });
+  await page.keyboard.down('ArrowRight'); await page.waitForTimeout(400); await page.keyboard.up('ArrowRight');
+  check('players cannot share a tile', await page.evaluate(() => game.players[0].tx === 1 && game.players[0].x === centerOf(1)));
+  await page.keyboard.down('ArrowDown'); await page.waitForTimeout(150); await page.keyboard.down('ArrowRight'); await page.waitForTimeout(60); await page.keyboard.up('ArrowDown'); await page.waitForTimeout(600); await page.keyboard.up('ArrowRight');
+  check('movement stays lane-centred', await page.evaluate(() => { const p = game.players[0]; return Math.abs(p.x - centerOf(p.tx)) < 0.01 || Math.abs(p.y - centerOf(p.ty)) < 0.01; }));
+
+  // Large battle map
+  await page.evaluate(() => { game.settings.battle = { humans: 1, bots: 3, skill: 'normal', map: 'large' }; game.startBattle(); });
+  check('large arena', await page.evaluate(() => COLS === 23 && ROWS === 17 && game.canvas.width % 1104 === 0 && game.grid.length === 17 && game.timeLeft > BATTLE_TIME));
+  await page.evaluate(() => { game.state = 'playing'; game.intro = null; game.timeLeft = SUDDEN_DEATH_AT + 0.05; });
+  await page.waitForTimeout(1200);
+  check('sudden death scales to arena', await page.evaluate(() => game.suddenDeath && game.spiral.length === 21 * 15 && game.spiralIndex >= 6));
+
+  // Pause -> Options -> back -> resume
+  await page.evaluate(() => { game.showTitle(); game.startCampaign('normal', 0); game.state = 'playing'; game.intro = null; });
+  await press(page, 'KeyP'); await press(page, 'Digit2');
+  check('options from pause', (await state(page)) === 'paused' && (await title(page)) === 'OPTIONS');
+  await press(page, 'Escape');
+  check('back to pause menu', (await title(page)) === 'PAUSED');
+  await press(page, 'Escape');
+  check('resume from pause', (await state(page)) === 'playing');
+  check('keybinding footer removed', await page.evaluate(() => !document.getElementById('controls') && !document.getElementById('hud-mute')));
 
   // Persistence shape: old save without new keys
   await page.evaluate(() => localStorage.setItem('bomberman.v1', JSON.stringify({ muted: true, battle: { humans: 2 } })));
