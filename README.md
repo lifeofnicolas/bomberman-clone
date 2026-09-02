@@ -7,7 +7,9 @@ effects are generated procedurally with the Web Audio API.
 
 ## Play
 
-Open `index.html` in any modern browser, or serve the folder:
+Play online: https://lifeofnicolas.github.io/bomberman-clone/
+
+Or run it locally: open `index.html` in any modern browser, or serve the folder:
 
 ```sh
 python3 -m http.server 8000
@@ -112,6 +114,14 @@ power-ups, so grab them quickly.
 | Ovapi (teal ghost) | 2000 | passes through bricks |
 | Pass (orange diamond) | 4000 | fast, walks over bombs, dodges |
 | Pontan (white star) | 8000 | fastest, passes everything |
+
+## Deployment
+
+Every push to `main` publishes the site to GitHub Pages through
+`.github/workflows/pages.yml`. No build step is involved; the repository root
+is uploaded as-is. The site also works on any static host (Vercel, Netlify,
+Cloudflare Pages): point it at the repository with no build command and the
+root as the output directory.
 
 ## Tests
 
